@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+venv_coi/
+coi_venv/
+
+# Logs
+*.log
+
+# SSL certificates
+*.pem
+cert.pem
+key.pem
+
+# Databases
+*.db
+
+# Screenshots
+screenshots/
+geico_screenshots/
+scanner_screenshots/
+
+# Generated files
+generated_pdfs/
+
+# Tunneling tools
+cloudflared*
+ngrok*
+
+# Temporary files
+*.tmp
+*.bak
+
+# IDE
+.vscode/
+.idea/
+
+# Claude settings
+.claude/
+
+# Node
+node_modules/
+package-lock.json
+
+# Credentials
+credentials/
+email_config_template.json
+
+# Other tools
+surefire-crm/
+vuln-scanner/
+retro-shooter/
+templates/
+"UIG COI Tool"/
+
+# Archives
+*.tar.gz
+*.tgz
+*.zip
+
+# Test files
+test_*.py
+test_*.html
+test.mp3
+
+# Backups
+backup*/
+backups/
+versions/
+branches/
