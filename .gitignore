@@ -33,6 +33,9 @@ ngrok*
 *.tmp
 *.bak
 
+# Saved sessions
+saved_sessions.json
+
 # IDE
 .vscode/
 .idea/

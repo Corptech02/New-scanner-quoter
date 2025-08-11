@@ -3,7 +3,7 @@
 Multi-Tab Claude Voice Assistant - Exact Replica
 Built from scratch based on precise UI specifications
 """
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO, emit
 import ssl
 import os
@@ -530,6 +530,38 @@ HTML_TEMPLATE = '''
             color: rgb(0, 0, 0);
         }
         
+        /* Save Button */
+        #saveButton.save-button {
+            display: flex;
+            position: static;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            width: 50px;
+            height: 50px;
+            margin-left: 10px;
+            padding: 0px;
+            border: 1.25px solid rgb(0, 255, 0);
+            border-radius: 50%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: rgb(0, 255, 0);
+            font-size: 20px;
+            cursor: pointer;
+            transition-property: all;
+            transition-duration: 0.3s;
+        }
+        
+        #saveButton:hover {
+            background-color: rgb(0, 255, 0);
+            color: rgb(0, 0, 0);
+        }
+        
+        #saveButton.active {
+            background-color: rgb(0, 255, 0);
+            color: rgb(0, 0, 0);
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.8);
+        }
+        
         /* Conversation Log */
         #conversationLog.conversation-log {
             display: block;
@@ -908,6 +940,7 @@ HTML_TEMPLATE = '''
                 <button id="muteButton" class="mute-button" onclick="toggleMute()">🔊</button>
                 <button id="bellButton" class="bell-button" onclick="toggleBell()">🔔</button>
                 <button id="settingsButton" class="settings-button" onclick="toggleSettings()">⚙️</button>
+                <button id="saveButton" class="save-button" onclick="toggleSave()">💾</button>
             </div>
             
             <!-- Conversation Log -->
@@ -998,6 +1031,7 @@ HTML_TEMPLATE = '''
         let isRecording = false;
         let isMuted = false;
         let bellEnabled = true;
+        let saveEnabled = false; // Track save state
         let notificationMode = 'chime'; // 'chime' or 'voice'
         let chimeSound = 'default';
         let recognition = null;
@@ -1201,6 +1235,22 @@ HTML_TEMPLATE = '''
             localStorage.setItem('bellEnabled', bellEnabled);
         }
         
+        function toggleSave() {
+            saveEnabled = !saveEnabled;
+            const button = document.getElementById('saveButton');
+            
+            if (saveEnabled) {
+                button.classList.add('active');
+                // Save current state immediately
+                saveAllSessions();
+            } else {
+                button.classList.remove('active');
+            }
+            
+            // Save preference
+            localStorage.setItem('saveEnabled', saveEnabled);
+        }
+        
         // Text Input Functions
         function sendTextMessage() {
             const input = document.getElementById('textInput');
@@ -1329,6 +1379,11 @@ HTML_TEMPLATE = '''
                         tab.classList.add('has-unread');
                     }
                 }
+                
+                // Auto-save if enabled
+                if (saveEnabled) {
+                    saveAllSessions();
+                }
             }
         });
         
@@ -1407,6 +1462,17 @@ HTML_TEMPLATE = '''
             const savedChime = localStorage.getItem('chimeSound');
             if (savedChime) {
                 chimeSound = savedChime;
+            }
+            
+            // Load save state preference
+            const savedSaveState = localStorage.getItem('saveEnabled');
+            if (savedSaveState !== null) {
+                saveEnabled = savedSaveState === 'true';
+                if (saveEnabled) {
+                    document.getElementById('saveButton').classList.add('active');
+                    // Load saved sessions
+                    loadSessions();
+                }
             }
             
             // Add event listeners for settings radio buttons
@@ -1647,6 +1713,73 @@ HTML_TEMPLATE = '''
             }
         }
         
+        // Save all sessions to server
+        async function saveAllSessions() {
+            if (!saveEnabled) return;
+            
+            const sessionData = {
+                conversations: tabConversations,
+                tabNames: {}
+            };
+            
+            // Get tab names
+            ['tab_1', 'tab_2', 'tab_3', 'tab_4'].forEach(tabId => {
+                const tab = document.getElementById(tabId);
+                if (tab) {
+                    sessionData.tabNames[tabId] = tab.querySelector('.tab-name').textContent;
+                }
+            });
+            
+            try {
+                const response = await fetch('/save_sessions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(sessionData)
+                });
+                
+                if (response.ok) {
+                    console.log('Sessions saved successfully');
+                }
+            } catch (error) {
+                console.error('Error saving sessions:', error);
+            }
+        }
+        
+        // Load sessions from server
+        async function loadSessions() {
+            if (!saveEnabled) return;
+            
+            try {
+                const response = await fetch('/load_sessions');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        // Restore conversations
+                        Object.assign(tabConversations, data.conversations);
+                        
+                        // Restore tab names
+                        Object.entries(data.tabNames || {}).forEach(([tabId, name]) => {
+                            const tab = document.getElementById(tabId);
+                            if (tab) {
+                                tab.querySelector('.tab-name').textContent = name;
+                            }
+                        });
+                        
+                        // Update display
+                        displayConversation();
+                        
+                        console.log('Sessions loaded successfully');
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+            }
+        }
+        
         // Terminal preview functionality
         let terminalContents = {
             'tab_1': '',
@@ -1665,7 +1798,7 @@ HTML_TEMPLATE = '''
     </script>
     
     <!-- Version -->
-    <div class="version">v2.2.0</div>
+    <div class="version">v2.3.0</div>
 </body>
 </html>
 '''
@@ -1943,6 +2076,100 @@ def handle_tab_switch(data):
     tab_id = data.get('tab_id')
     if tab_id:
         orchestrator.switch_tab(tab_id)
+
+@app.route('/save_sessions', methods=['POST'])
+def save_sessions():
+    """Save all session data to file"""
+    try:
+        data = request.json
+        
+        # Save to a JSON file
+        import json
+        save_file = 'saved_sessions.json'
+        
+        # Add orchestrator session data
+        data['orchestrator_sessions'] = {}
+        for tab_id in ['tab_1', 'tab_2', 'tab_3', 'tab_4']:
+            session_info = orchestrator.get_session_info(tab_id)
+            if session_info:
+                data['orchestrator_sessions'][tab_id] = {
+                    'session_id': session_info.get('session_id'),
+                    'project_name': session_info.get('project_name'),
+                    'message_count': session_info.get('message_count', 0),
+                    'total_tokens': session_info.get('total_tokens', 0),
+                    'total_duration': session_info.get('total_duration', 0)
+                }
+        
+        with open(save_file, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"[SAVE] Error saving sessions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/load_sessions', methods=['GET'])
+def load_sessions():
+    """Load saved session data from file"""
+    try:
+        import json
+        save_file = 'saved_sessions.json'
+        
+        if os.path.exists(save_file):
+            with open(save_file, 'r') as f:
+                data = json.load(f)
+            
+            return jsonify({
+                'success': True,
+                'conversations': data.get('conversations', {}),
+                'tabNames': data.get('tabNames', {}),
+                'orchestrator_sessions': data.get('orchestrator_sessions', {})
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'conversations': {},
+                'tabNames': {},
+                'orchestrator_sessions': {}
+            })
+    except Exception as e:
+        print(f"[LOAD] Error loading sessions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/tts', methods=['POST'])
+def tts():
+    """Text-to-speech endpoint"""
+    data = request.json
+    text = data.get('text', '')
+    voice = data.get('voice', 'en-US-AriaNeural')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    try:
+        # Use edge-tts to generate speech
+        import edge_tts
+        import asyncio
+        
+        async def generate_speech():
+            tts = edge_tts.Communicate(text, voice)
+            audio_data = b''
+            async for chunk in tts.stream():
+                if chunk['type'] == 'audio':
+                    audio_data += chunk['data']
+            return audio_data
+        
+        # Run async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        audio_data = loop.run_until_complete(generate_speech())
+        
+        # Return audio as response
+        return Response(audio_data, mimetype='audio/mpeg')
+        
+    except Exception as e:
+        print(f"[TTS] Error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 

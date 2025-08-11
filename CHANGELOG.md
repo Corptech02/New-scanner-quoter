@@ -5,6 +5,19 @@ All notable changes to the Multi-Tab Claude Voice Bot will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-08-11
+
+### Added
+- Save state toggle (💾) to persist sessions across devices
+- Auto-save functionality when bot responds
+- Server-side session storage in JSON file
+- Session restore on page load when save is enabled
+- TTS endpoint for voice announcements
+
+### Changed
+- Sessions now persist across browser refreshes when save is enabled
+- Chat history and tab names are preserved when switching devices
+
 ## [2.2.0] - 2025-08-11
 
 ### Added
