@@ -8,15 +8,21 @@ import time
 import json
 from typing import Dict, Optional, List
 from datetime import datetime
+from terminal_monitor import terminal_monitor
 
 class ClaudeMemorySession:
     """Session that maintains conversation history"""
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, tab_id: str = None):
         self.session_id = session_id
+        self.tab_id = tab_id
         self.message_count = 0
         self.conversation_history: List[Dict[str, str]] = []
         self.max_context_messages = 10  # Keep last 10 exchanges
+        
+        # Initialize terminal monitor for this tab
+        if self.tab_id:
+            terminal_monitor.initialize_buffer(self.tab_id)
         
     def send_message(self, message: str, retry_count: int = 0) -> str:
         """Send a message to Claude with conversation context and retry mechanism"""
@@ -32,6 +38,10 @@ class ClaudeMemorySession:
             # Build context from conversation history
             context_prompt = self._build_context_prompt(message)
             
+            # Add command to terminal monitor
+            if self.tab_id:
+                terminal_monitor.add_command(self.tab_id, f"claude {message[:50]}...")
+            
             # Call Claude with full context
             cmd = ['claude', '--dangerously-skip-permissions', '--print', context_prompt]
             
@@ -46,6 +56,10 @@ class ClaudeMemorySession:
             
             if result.returncode == 0 and result.stdout:
                 response = result.stdout.strip()
+                
+                # Add output to terminal monitor
+                if self.tab_id:
+                    terminal_monitor.add_output(self.tab_id, response)
                 
                 # Check for execution error in response
                 if "execution error" in response.lower() and retry_count < max_retries:
@@ -74,6 +88,10 @@ class ClaudeMemorySession:
                 return response
             else:
                 print(f"[SESSION {self.session_id[:8]}] Error: returncode={result.returncode}, stderr={result.stderr}")
+                
+                # Add error to terminal monitor
+                if self.tab_id and result.stderr:
+                    terminal_monitor.add_output(self.tab_id, f"ERROR: {result.stderr}")
                 
                 # Check if this looks like an execution error and retry
                 error_message = result.stderr or "Unknown error"
@@ -159,7 +177,7 @@ class ClaudeMemoryOrchestrator:
     def create_session(self, tab_id: str) -> str:
         """Create a new Claude session for a tab"""
         session_id = str(uuid.uuid4())
-        session = ClaudeMemorySession(session_id)
+        session = ClaudeMemorySession(session_id, tab_id=tab_id)
         self.sessions[tab_id] = session
         self.session_data[tab_id] = {
             'created_at': datetime.now().isoformat(),

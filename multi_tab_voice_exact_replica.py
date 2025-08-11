@@ -9,7 +9,12 @@ import ssl
 import os
 import threading
 import time
+import sys
 from orchestrator_simple_v2 import orchestrator
+
+# Force unbuffered output
+sys.stdout = sys.__stdout__
+sys.stderr = sys.__stderr__
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'exact-replica-secret-key'
@@ -553,54 +558,85 @@ HTML_TEMPLATE = '''
         #tokenUsageBox.token-usage-box {
             display: block;
             position: static;
-            width: 517.5px;
-            height: 92.5px;
+            width: 517.333px;
+            max-width: 100%;
+            height: 92.6667px;
             margin: 15px 0px 0px;
             padding: 15px;
-            border: 1.25px solid rgb(0, 255, 0);
+            border: 1.33333px solid rgb(0, 255, 0);
             border-radius: 8px;
             background-color: rgb(17, 17, 17);
             color: rgb(0, 255, 0);
-            font-size: 16px;
-            text-align: start;
-            overflow: visible;
+            text-shadow: rgba(0, 255, 0, 0.84) 0px 0px 21.9524px, rgba(0, 255, 0, 0.157) 0px 0px 7.80969px;
+            box-sizing: border-box;
         }
         
         /* Token Header */
         .token-header {
+            display: block;
+            position: static;
+            width: 485px;
+            max-width: 100%;
+            height: 21.25px;
+            margin: 0px 0px 10px;
+            font-size: 16px;
             font-weight: 700;
             text-align: center;
-            margin-bottom: 10px;
-            text-shadow: rgba(0, 255, 0, 0.804) 0px 0px 20.29px, 
-                         rgba(0, 255, 0, 0.024) 0px 0px 1.15983px;
+            background-color: rgba(0, 0, 0, 0);
         }
         
         /* Token Content */
         .token-content {
             display: grid;
+            position: static;
+            width: 484.667px;
+            max-width: 100%;
+            height: 28.6667px;
+            margin: 0px;
+            padding: 0px;
+            background-color: rgba(0, 0, 0, 0);
             gap: 10px;
-            text-shadow: rgba(0, 255, 0, 0.804) 0px 0px 20.29px, 
-                         rgba(0, 255, 0, 0.024) 0px 0px 1.15983px;
+            grid-template-columns: 1fr 1fr;
         }
         
         /* Token Item */
         .token-item {
             display: flex;
+            position: static;
+            flex-direction: row;
             justify-content: space-between;
+            align-items: center;
+            height: 28.6667px;
+            margin: 0px;
             padding: 5px;
             background-color: rgb(10, 10, 10);
             border-radius: 4px;
+            box-sizing: border-box;
         }
         
         /* Token Label */
         .token-label {
-            color: rgb(0, 255, 0);
+            display: block;
+            position: static;
+            margin: 0px;
+            padding: 0px;
+            margin-right: 10px;
+            color: rgb(153, 153, 153);
+            font-size: 14px;
+            font-weight: 400;
+            background-color: rgba(0, 0, 0, 0);
         }
         
         /* Token Value */
         .token-value {
+            display: block;
+            position: static;
+            margin: 0px;
+            padding: 0px;
             color: rgb(0, 255, 0);
-            font-weight: 600;
+            font-size: 14px;
+            font-weight: 700;
+            background-color: rgba(0, 0, 0, 0);
         }
         
         /* Info */
@@ -740,6 +776,7 @@ HTML_TEMPLATE = '''
             background-color: rgb(0, 255, 0);
             color: rgb(0, 0, 0);
         }
+        
     </style>
 </head>
 <body>
@@ -970,6 +1007,11 @@ HTML_TEMPLATE = '''
             activeTab.classList.remove('has-unread');
             activeTabId = tabId;
             
+            // Clear status if switching away from recording tab
+            if (recordingTabId && recordingTabId !== tabId) {
+                document.getElementById('status').textContent = 'Ready';
+            }
+            
             // Display conversation for this tab
             displayConversation();
             
@@ -1005,8 +1047,8 @@ HTML_TEMPLATE = '''
                     }
                 }
                 
-                // Update status with current speech
-                if (interimTranscript) {
+                // Update status with current speech only if on recording tab
+                if (interimTranscript && activeTabId === recordingTabId) {
                     document.getElementById('status').textContent = 'Listening: ' + interimTranscript;
                 }
                 
@@ -1215,10 +1257,58 @@ HTML_TEMPLATE = '''
             }
         });
         
+        // Format tokens with k notation for large numbers
+        function formatTokens(tokens) {
+            if (tokens === 0 || !tokens) return '0';
+            if (tokens < 1000) return tokens.toString();
+            
+            const k = tokens / 1000;
+            if (k < 10) {
+                // Show one decimal place for < 10k
+                return k.toFixed(1) + 'k';
+            } else {
+                // No decimal places for >= 10k
+                return Math.floor(k) + 'k';
+            }
+        }
+        
+        // Format duration in mm:ss or hh:mm:ss
+        function formatDuration(seconds) {
+            if (!seconds || seconds === 0) return '0:00';
+            
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
+        }
+        
         socket.on('realtime_stats', (data) => {
+            console.log('Received realtime_stats:', data);
             if (data.tab_id === activeTabId) {
-                document.getElementById('realtimeTime').textContent = data.time || '-';
-                document.getElementById('realtimeTokens').textContent = data.tokens || '-';
+                // Update time with proper formatting
+                const timeElement = document.getElementById('realtimeTime');
+                if (timeElement && data.duration !== undefined) {
+                    timeElement.textContent = formatDuration(data.duration);
+                    // Add processing indicator if actively processing
+                    if (data.is_processing) {
+                        timeElement.textContent += ' ⏳';
+                    }
+                } else if (timeElement) {
+                    timeElement.textContent = '-';
+                }
+                
+                // Update tokens with k notation
+                const tokensElement = document.getElementById('realtimeTokens');
+                if (tokensElement && data.tokens !== undefined) {
+                    tokensElement.textContent = formatTokens(data.tokens);
+                } else if (tokensElement) {
+                    tokensElement.textContent = '-';
+                }
             }
         });
         
@@ -1339,6 +1429,22 @@ HTML_TEMPLATE = '''
         function testAddTab() {
             console.log('Test Add Tab clicked');
         }
+        
+        // Terminal preview functionality
+        let terminalContents = {
+            'tab_1': '',
+            'tab_2': '',
+            'tab_3': '',
+            'tab_4': ''
+        };
+        
+        
+        // Update switchTab to show/hide terminal preview
+        const originalSwitchTab = switchTab;
+        switchTab = function(tabId) {
+            originalSwitchTab(tabId);
+        };
+        
     </script>
 </body>
 </html>
@@ -1351,6 +1457,7 @@ def index():
 # Global state
 response_queues = {}  # tab_id -> queue
 capture_threads = {}  # tab_id -> thread
+stats_threads = {}  # tab_id -> thread
 
 def capture_responses(session_id, tab_id):
     """Capture responses from Claude for a specific session"""
@@ -1366,6 +1473,9 @@ def capture_responses(session_id, tab_id):
             
         try:
             content = orchestrator.capture_response(session_id)
+            
+            if content:
+                print(f"[CAPTURE DEBUG] Got content for tab {tab_id}: {content[:100]}", flush=True)
             
             if content and content != last_content:
                 # Debug: Show first 200 chars of new content
@@ -1390,7 +1500,8 @@ def capture_responses(session_id, tab_id):
                             response_hash = hash(full_response)
                             if response_hash not in processed_responses:
                                 processed_responses.add(response_hash)
-                                print(f"[CAPTURE] Emitting complete response for tab {tab_id}: {len(full_response)} chars")
+                                print(f"[CAPTURE] Emitting complete response for tab {tab_id}: {len(full_response)} chars", flush=True)
+                                print(f"[CAPTURE] Response text: '{full_response}'", flush=True)
                                 socketio.emit('response', {
                                     'tab_id': tab_id,
                                     'text': full_response
@@ -1445,6 +1556,42 @@ def capture_responses(session_id, tab_id):
             
         time.sleep(0.5)
 
+def emit_realtime_stats(tab_id):
+    """Emit real-time stats for a tab"""
+    print(f"[STATS] Started stats thread for tab {tab_id}")
+    last_emit_time = 0
+    
+    while tab_id in stats_threads:
+        try:
+            current_time = time.time()
+            
+            # Emit stats every 0.5 seconds
+            if current_time - last_emit_time >= 0.5:
+                session_info = orchestrator.get_session_info(tab_id)
+                
+                if session_info:
+                    # Use is_processing from orchestrator
+                    is_processing = session_info.get('is_processing', False)
+                    
+                    # Emit stats - now using per-request metrics
+                    stats_data = {
+                        'tab_id': tab_id,
+                        'duration': session_info.get('duration', 0),  # Changed from session_duration
+                        'tokens': session_info.get('tokens', 0),      # Changed from total_tokens
+                        'is_processing': is_processing
+                    }
+                    print(f"[STATS] Emitting for {tab_id}: duration={stats_data['duration']:.1f}s, tokens={stats_data['tokens']}, processing={is_processing}", flush=True)
+                    socketio.emit('realtime_stats', stats_data)
+                    
+                last_emit_time = current_time
+                
+        except Exception as e:
+            print(f"[STATS] Error emitting stats for tab {tab_id}: {e}")
+            
+        time.sleep(0.5)
+    
+    print(f"[STATS] Stopped stats thread for tab {tab_id}")
+
 @app.route('/create_session', methods=['POST'])
 def create_session():
     try:
@@ -1458,15 +1605,27 @@ def create_session():
         session_id = orchestrator.create_session(tab_id, project_name)
         print(f"[CREATE_SESSION] Session created: {session_id}")
         
-        # Start response capture thread
-        thread = threading.Thread(
-            target=capture_responses, 
-            args=(session_id, tab_id),
-            daemon=True
-        )
-        thread.start()
-        capture_threads[tab_id] = thread
-        print(f"[CREATE] Started capture thread for tab {tab_id}, session {session_id}")
+        # Start response capture thread if not already running
+        if tab_id not in capture_threads:
+            thread = threading.Thread(
+                target=capture_responses, 
+                args=(session_id, tab_id),
+                daemon=True
+            )
+            capture_threads[tab_id] = thread  # Add to dict BEFORE starting
+            thread.start()
+            print(f"[CREATE] Started capture thread for tab {tab_id}, session {session_id}")
+        
+        # Start stats thread if not already running
+        if tab_id not in stats_threads:
+            stats_thread = threading.Thread(
+                target=emit_realtime_stats,
+                args=(tab_id,),
+                daemon=True
+            )
+            stats_threads[tab_id] = stats_thread  # Add to dict BEFORE starting
+            stats_thread.start()
+            print(f"[CREATE] Started stats thread for tab {tab_id}")
         
         return jsonify({
             'success': True,
@@ -1490,28 +1649,36 @@ def send_command():
         
         print(f"[SEND] Sending '{command}' to tab {tab_id}")
         
-        # Check if we need to start a capture thread for this tab
-        if tab_id not in capture_threads:
-            print(f"[SEND] No capture thread for tab {tab_id}, creating session first")
-            # Get or create session
-            session = orchestrator.get_session_info(tab_id)
-            if not session:
-                # Create session if it doesn't exist
-                bot_session = orchestrator.create_session(tab_id, f"Tab {tab_id}")
-                session_id = bot_session.session_id
-                print(f"[SEND] Created session: {session_id}")
-            else:
-                session_id = session['session_id']
+        # Check if we need to start threads for this tab
+        session = orchestrator.get_session_info(tab_id)
+        if not session:
+            print(f"[SEND] No session for tab {tab_id}, creating one")
+            # Create session if it doesn't exist
+            bot_session = orchestrator.create_session(tab_id, f"Tab {tab_id}")
+            session_id = bot_session.session_id
+            print(f"[SEND] Created session: {session_id}")
             
-            # Start capture thread if not already running
-            thread = threading.Thread(
-                target=capture_responses, 
-                args=(session_id, tab_id),
-                daemon=True
-            )
-            thread.start()
-            capture_threads[tab_id] = thread
-            print(f"[SEND] Started capture thread for tab {tab_id}")
+            # Start capture thread for new session
+            if tab_id not in capture_threads:
+                thread = threading.Thread(
+                    target=capture_responses, 
+                    args=(session_id, tab_id),
+                    daemon=True
+                )
+                capture_threads[tab_id] = thread  # Add to dict BEFORE starting
+                thread.start()
+                print(f"[SEND] Started capture thread for tab {tab_id}")
+            
+            # Start stats thread for new session
+            if tab_id not in stats_threads:
+                stats_thread = threading.Thread(
+                    target=emit_realtime_stats,
+                    args=(tab_id,),
+                    daemon=True
+                )
+                stats_threads[tab_id] = stats_thread  # Add to dict BEFORE starting
+                stats_thread.start()
+                print(f"[SEND] Started stats thread for tab {tab_id}")
         
         # Route message through orchestrator
         session_id = orchestrator.route_message(tab_id, command)
@@ -1556,6 +1723,8 @@ def handle_tab_switch(data):
     tab_id = data.get('tab_id')
     if tab_id:
         orchestrator.switch_tab(tab_id)
+
+
 
 if __name__ == '__main__':
     # Create SSL context for HTTPS

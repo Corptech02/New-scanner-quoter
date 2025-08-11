@@ -22,13 +22,13 @@ class BotSession:
     is_active: bool = True
     last_activity: datetime = None
     messages: List[dict] = field(default_factory=list)
-    # Token usage tracking
+    # Per-request metrics (reset after each response)
+    current_request_tokens: int = 0
+    current_request_duration: float = 0.0
+    current_request_start: datetime = None
+    # Cumulative metrics (for history)
     total_tokens: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    # Time tracking
-    session_duration: float = 0.0  # seconds
-    last_update_time: datetime = None
+    total_duration: float = 0.0
 
 class SimpleOrchestrator:
     """
@@ -65,8 +65,7 @@ class SimpleOrchestrator:
                 tab_id=tab_id,
                 created_at=datetime.now(),
                 project_name=project_name,
-                last_activity=datetime.now(),
-                last_update_time=datetime.now()
+                last_activity=datetime.now()
             )
             
             # Store session
@@ -91,9 +90,25 @@ class SimpleOrchestrator:
         session = self.sessions[tab_id]
         session.last_activity = datetime.now()
         
+        # Reset per-request metrics
+        session.current_request_tokens = 0
+        session.current_request_duration = 0.0
+        
+        # Track request start time
+        request_start = datetime.now()
+        session.current_request_start = request_start
+        
         # Send message using simple orchestrator
         print(f"[ORCHESTRATOR] Sending message to simple_orchestrator")
         response = simple_orchestrator.send_message(tab_id, message)
+        
+        # Calculate request duration
+        request_duration = (datetime.now() - request_start).total_seconds()
+        session.current_request_duration = request_duration
+        session.current_request_start = None  # Clear to stop timer
+        
+        # Add to cumulative metrics
+        session.total_duration += request_duration
         
         if response:
             print(f"[ORCHESTRATOR] Got response: {response[:100]}...")
@@ -103,8 +118,9 @@ class SimpleOrchestrator:
             # Update token count (estimate based on response length)
             # This is a rough estimate - 1 token ≈ 4 characters
             estimated_tokens = len(message) // 4 + len(response) // 4
-            session.input_tokens += len(message) // 4
-            session.output_tokens += len(response) // 4
+            session.current_request_tokens = estimated_tokens
+            
+            # Add to cumulative metrics
             session.total_tokens += estimated_tokens
             
             # Store message and response
@@ -146,12 +162,6 @@ class SimpleOrchestrator:
             return None
             
         session = self.sessions[tab_id]
-        
-        # Update session duration
-        if session.last_update_time:
-            time_diff = (datetime.now() - session.last_update_time).total_seconds()
-            session.session_duration += time_diff
-        session.last_update_time = datetime.now()
         
         # Return the last response if available
         if tab_id in self.last_responses:
@@ -215,11 +225,16 @@ class SimpleOrchestrator:
         
         session = self.sessions[tab_id]
         
-        # Update duration if session is active
-        current_duration = session.session_duration
-        if session.last_update_time:
-            time_diff = (datetime.now() - session.last_update_time).total_seconds()
-            current_duration += time_diff
+        # Get current request metrics
+        current_duration = session.current_request_duration
+        current_tokens = session.current_request_tokens
+        is_processing = False
+        
+        if session.current_request_start:
+            # Currently processing - calculate live duration
+            time_diff = (datetime.now() - session.current_request_start).total_seconds()
+            current_duration = time_diff
+            is_processing = True
         
         return {
             'session_id': session.session_id,
@@ -229,13 +244,14 @@ class SimpleOrchestrator:
             'last_activity': session.last_activity.isoformat() if session.last_activity else None,
             'is_active': session.is_active,
             'message_count': len(session.messages),
-            # Token usage
+            # Current request metrics (what we display)
+            'tokens': current_tokens,
+            'duration': current_duration,
+            # Cumulative metrics (for history)
             'total_tokens': session.total_tokens,
-            'input_tokens': session.input_tokens,
-            'output_tokens': session.output_tokens,
-            # Time tracking
-            'session_duration': current_duration,
-            'session_duration_formatted': self._format_duration(current_duration)
+            'total_duration': session.total_duration,
+            'total_duration_formatted': self._format_duration(session.total_duration),
+            'is_processing': is_processing
         }
     
     def _format_duration(self, seconds: float) -> str:
