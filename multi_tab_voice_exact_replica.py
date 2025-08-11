@@ -1497,22 +1497,25 @@ HTML_TEMPLATE = '''
                 radio.addEventListener('change', updateSettingsVisibility);
             });
             
-            // Create sessions for all tabs
-            const tabNames = ['Tab 1', 'Tab 2', 'Tab 3', 'Tab 4'];
-            const tabIds = ['tab_1', 'tab_2', 'tab_3', 'tab_4'];
-            
-            tabIds.forEach((tabId, index) => {
-                fetch('/create_session', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        tab_id: tabId,
-                        project_name: tabNames[index]
-                    })
+            // Only create new sessions if we're not loading saved data
+            if (!hasSavedData) {
+                // Create sessions for all tabs
+                const tabNames = ['Tab 1', 'Tab 2', 'Tab 3', 'Tab 4'];
+                const tabIds = ['tab_1', 'tab_2', 'tab_3', 'tab_4'];
+                
+                tabIds.forEach((tabId, index) => {
+                    fetch('/create_session', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            tab_id: tabId,
+                            project_name: tabNames[index]
+                        })
+                    });
                 });
-            });
+            }
         });
         
         // Audio Functions
@@ -1980,7 +1983,8 @@ def create_session():
         print(f"[CREATE_SESSION] Creating session for tab {tab_id}, project: {project_name}")
         
         # Create session in orchestrator
-        session_id = orchestrator.create_session(tab_id, project_name)
+        bot_session = orchestrator.create_session(tab_id, project_name)
+        session_id = bot_session.session_id if hasattr(bot_session, 'session_id') else str(bot_session)
         print(f"[CREATE_SESSION] Session created: {session_id}")
         
         # Start response capture thread if not already running
