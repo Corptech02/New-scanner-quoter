@@ -2,6 +2,7 @@
 
 A sophisticated multi-tab voice interface for Claude AI with real-time speech recognition, text-to-speech, and session management. Built for power users who need multiple concurrent AI conversations with voice interaction.
 
+![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![Flask](https://img.shields.io/badge/flask-3.0.0-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -156,6 +157,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Microsoft Edge TTS](https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/) for voice synthesis
 - [Flask-SocketIO](https://flask-socketio.readthedocs.io/) for real-time communication
 - Web Speech API for browser-based voice recognition
+
+## 📊 Version History
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+
+**Current Version: 2.1.0**
+- Stats display works like Claude AI (per-request metrics)
+- Fixed thread synchronization issues
+- Added terminal monitor integration
 
 ## 🐛 Known Issues
 

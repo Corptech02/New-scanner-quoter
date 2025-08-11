@@ -654,6 +654,16 @@ HTML_TEMPLATE = '''
             text-align: center;
         }
         
+        /* Version */
+        .version {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            color: rgb(68, 68, 68);
+            font-size: 12px;
+            opacity: 0.7;
+        }
+        
         /* Modal */
         #newTabModal.modal {
             display: none;
@@ -1446,6 +1456,9 @@ HTML_TEMPLATE = '''
         };
         
     </script>
+    
+    <!-- Version -->
+    <div class="version">v2.1.0</div>
 </body>
 </html>
 '''
