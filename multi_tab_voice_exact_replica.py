@@ -1235,7 +1235,7 @@ HTML_TEMPLATE = '''
             localStorage.setItem('bellEnabled', bellEnabled);
         }
         
-        function toggleSave() {
+        async function toggleSave() {
             saveEnabled = !saveEnabled;
             const button = document.getElementById('saveButton');
             
@@ -1245,6 +1245,14 @@ HTML_TEMPLATE = '''
                 saveAllSessions();
             } else {
                 button.classList.remove('active');
+                // Clear saved sessions when disabling
+                try {
+                    await fetch('/clear_sessions', {
+                        method: 'POST'
+                    });
+                } catch (error) {
+                    console.error('Error clearing sessions:', error);
+                }
             }
             
             // Save preference
@@ -1443,7 +1451,7 @@ HTML_TEMPLATE = '''
         });
         
         // Create sessions on load
-        window.addEventListener('load', () => {
+        window.addEventListener('load', async () => {
             // Load bell preference
             const savedBell = localStorage.getItem('bellEnabled');
             if (savedBell !== null) {
@@ -1464,14 +1472,23 @@ HTML_TEMPLATE = '''
                 chimeSound = savedChime;
             }
             
-            // Load save state preference
-            const savedSaveState = localStorage.getItem('saveEnabled');
-            if (savedSaveState !== null) {
-                saveEnabled = savedSaveState === 'true';
-                if (saveEnabled) {
-                    document.getElementById('saveButton').classList.add('active');
-                    // Load saved sessions
-                    loadSessions();
+            // Check if saved sessions exist on server
+            const hasSavedData = await loadSessions(true);
+            
+            if (hasSavedData) {
+                // If saved data exists, enable save mode automatically
+                saveEnabled = true;
+                document.getElementById('saveButton').classList.add('active');
+                // Load the saved sessions
+                await loadSessions(false);
+            } else {
+                // Otherwise, check localStorage preference
+                const savedSaveState = localStorage.getItem('saveEnabled');
+                if (savedSaveState !== null) {
+                    saveEnabled = savedSaveState === 'true';
+                    if (saveEnabled) {
+                        document.getElementById('saveButton').classList.add('active');
+                    }
                 }
             }
             
@@ -1748,9 +1765,7 @@ HTML_TEMPLATE = '''
         }
         
         // Load sessions from server
-        async function loadSessions() {
-            if (!saveEnabled) return;
-            
+        async function loadSessions(checkOnly = false) {
             try {
                 const response = await fetch('/load_sessions');
                 
@@ -1758,25 +1773,35 @@ HTML_TEMPLATE = '''
                     const data = await response.json();
                     
                     if (data.success) {
-                        // Restore conversations
-                        Object.assign(tabConversations, data.conversations);
+                        // If just checking, return whether data exists
+                        if (checkOnly) {
+                            return data.hasData;
+                        }
                         
-                        // Restore tab names
-                        Object.entries(data.tabNames || {}).forEach(([tabId, name]) => {
-                            const tab = document.getElementById(tabId);
-                            if (tab) {
-                                tab.querySelector('.tab-name').textContent = name;
-                            }
-                        });
-                        
-                        // Update display
-                        displayConversation();
-                        
-                        console.log('Sessions loaded successfully');
+                        // If data exists and we're not just checking, restore it
+                        if (data.hasData) {
+                            // Restore conversations
+                            Object.assign(tabConversations, data.conversations);
+                            
+                            // Restore tab names
+                            Object.entries(data.tabNames || {}).forEach(([tabId, name]) => {
+                                const tab = document.getElementById(tabId);
+                                if (tab) {
+                                    tab.querySelector('.tab-name').textContent = name;
+                                }
+                            });
+                            
+                            // Update display
+                            displayConversation();
+                            
+                            console.log('Sessions loaded successfully');
+                        }
                     }
                 }
+                return false;
             } catch (error) {
                 console.error('Error loading sessions:', error);
+                return false;
             }
         }
         
@@ -2087,6 +2112,9 @@ def save_sessions():
         import json
         save_file = 'saved_sessions.json'
         
+        # Add save state preference
+        data['saveEnabled'] = True
+        
         # Add orchestrator session data
         data['orchestrator_sessions'] = {}
         for tab_id in ['tab_1', 'tab_2', 'tab_3', 'tab_4']:
@@ -2121,6 +2149,7 @@ def load_sessions():
             
             return jsonify({
                 'success': True,
+                'hasData': True,
                 'conversations': data.get('conversations', {}),
                 'tabNames': data.get('tabNames', {}),
                 'orchestrator_sessions': data.get('orchestrator_sessions', {})
@@ -2128,12 +2157,28 @@ def load_sessions():
         else:
             return jsonify({
                 'success': True,
+                'hasData': False,
                 'conversations': {},
                 'tabNames': {},
                 'orchestrator_sessions': {}
             })
     except Exception as e:
         print(f"[LOAD] Error loading sessions: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/clear_sessions', methods=['POST'])
+def clear_sessions():
+    """Clear saved session data"""
+    try:
+        import json
+        save_file = 'saved_sessions.json'
+        
+        if os.path.exists(save_file):
+            os.remove(save_file)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"[CLEAR] Error clearing sessions: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/tts', methods=['POST'])
