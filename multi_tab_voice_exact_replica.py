@@ -504,6 +504,32 @@ HTML_TEMPLATE = '''
             transition-duration: 0.3s;
         }
         
+        /* Settings Button */
+        #settingsButton.settings-button {
+            display: flex;
+            position: static;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            width: 50px;
+            height: 50px;
+            margin-left: 10px;
+            padding: 0px;
+            border: 1.25px solid rgb(0, 255, 0);
+            border-radius: 50%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: rgb(0, 255, 0);
+            font-size: 20px;
+            cursor: pointer;
+            transition-property: all;
+            transition-duration: 0.3s;
+        }
+        
+        #settingsButton:hover {
+            background-color: rgb(0, 255, 0);
+            color: rgb(0, 0, 0);
+        }
+        
         /* Conversation Log */
         #conversationLog.conversation-log {
             display: block;
@@ -881,6 +907,7 @@ HTML_TEMPLATE = '''
                 </select>
                 <button id="muteButton" class="mute-button" onclick="toggleMute()">🔊</button>
                 <button id="bellButton" class="bell-button" onclick="toggleBell()">🔔</button>
+                <button id="settingsButton" class="settings-button" onclick="toggleSettings()">⚙️</button>
             </div>
             
             <!-- Conversation Log -->
@@ -924,6 +951,42 @@ HTML_TEMPLATE = '''
         </div>
     </div>
     
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeSettings()">×</button>
+            <h3>Settings</h3>
+            
+            <div class="settings-section">
+                <h4>Notification Sound</h4>
+                <label style="display: block; margin: 10px 0;">
+                    <input type="radio" name="notifSound" value="chime" checked id="chimeOption">
+                    Default Chime
+                </label>
+                <label style="display: block; margin: 10px 0;">
+                    <input type="radio" name="notifSound" value="voice" id="voiceOption">
+                    Voice Announcement (Tab Name)
+                </label>
+            </div>
+            
+            <div class="settings-section" id="chimeSettings" style="margin-top: 20px;">
+                <h4>Chime Sound</h4>
+                <select id="chimeSelect" onchange="updateChimeSound()" style="width: 100%; padding: 8px; margin: 10px 0;">
+                    <option value="default">Default</option>
+                    <option value="bell">Bell</option>
+                    <option value="ding">Ding</option>
+                    <option value="soft">Soft Chime</option>
+                </select>
+                <button onclick="testChime()" style="padding: 8px 16px;">Test Sound</button>
+            </div>
+            
+            <div class="modal-buttons" style="margin-top: 20px;">
+                <button class="cancel" onclick="closeSettings()">Cancel</button>
+                <button onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script>
         // Initialize Socket.IO
@@ -935,6 +998,8 @@ HTML_TEMPLATE = '''
         let isRecording = false;
         let isMuted = false;
         let bellEnabled = true;
+        let notificationMode = 'chime'; // 'chime' or 'voice'
+        let chimeSound = 'default';
         let recognition = null;
         let currentAudio = null;
         let audioContext = null;
@@ -1249,7 +1314,7 @@ HTML_TEMPLATE = '''
                 
                 // Always play chime for any tab response if bell is enabled
                 if (bellEnabled) {
-                    playChime();
+                    playChime(data.tab_id);
                 }
                 
                 // If this is the active tab, update display and speak
@@ -1333,6 +1398,22 @@ HTML_TEMPLATE = '''
                 }
             }
             
+            // Load notification settings
+            const savedMode = localStorage.getItem('notificationMode');
+            if (savedMode) {
+                notificationMode = savedMode;
+            }
+            
+            const savedChime = localStorage.getItem('chimeSound');
+            if (savedChime) {
+                chimeSound = savedChime;
+            }
+            
+            // Add event listeners for settings radio buttons
+            document.querySelectorAll('input[name="notifSound"]').forEach(radio => {
+                radio.addEventListener('change', updateSettingsVisibility);
+            });
+            
             // Create sessions for all tabs
             const tabNames = ['Tab 1', 'Tab 2', 'Tab 3', 'Tab 4'];
             const tabIds = ['tab_1', 'tab_2', 'tab_3', 'tab_4'];
@@ -1359,8 +1440,14 @@ HTML_TEMPLATE = '''
         }
         
         // Play notification chime using Web Audio API
-        function playChime() {
+        function playChime(tabId = null) {
             if (!bellEnabled) return;
+            
+            // If voice mode is enabled, speak the tab name instead
+            if (notificationMode === 'voice' && tabId) {
+                speakTabName(tabId);
+                return;
+            }
             
             initAudioContext();
             
@@ -1370,16 +1457,48 @@ HTML_TEMPLATE = '''
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
             
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(1200, audioContext.currentTime + 0.1);
-            oscillator.frequency.exponentialRampToValueAtTime(1000, audioContext.currentTime + 0.15);
-            
-            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
-            
-            oscillator.start(audioContext.currentTime);
-            oscillator.stop(audioContext.currentTime + 0.15);
+            // Configure different chime sounds
+            switch(chimeSound) {
+                case 'bell':
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(1200, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(800, audioContext.currentTime + 0.3);
+                    gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.3);
+                    break;
+                    
+                case 'ding':
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(1500, audioContext.currentTime);
+                    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.1);
+                    break;
+                    
+                case 'soft':
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.2);
+                    gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.2);
+                    break;
+                    
+                default: // default
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(1200, audioContext.currentTime + 0.1);
+                    oscillator.frequency.exponentialRampToValueAtTime(1000, audioContext.currentTime + 0.15);
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.15);
+                    break;
+            }
         }
         
         // Speak text using TTS
@@ -1440,6 +1559,94 @@ HTML_TEMPLATE = '''
             console.log('Test Add Tab clicked');
         }
         
+        // Settings functions
+        function toggleSettings() {
+            document.getElementById('settingsModal').style.display = 'flex';
+            
+            // Update UI to reflect current settings
+            document.getElementById('chimeOption').checked = notificationMode === 'chime';
+            document.getElementById('voiceOption').checked = notificationMode === 'voice';
+            document.getElementById('chimeSelect').value = chimeSound;
+            
+            // Show/hide chime settings based on mode
+            updateSettingsVisibility();
+        }
+        
+        function closeSettings() {
+            document.getElementById('settingsModal').style.display = 'none';
+        }
+        
+        function updateSettingsVisibility() {
+            const chimeSettings = document.getElementById('chimeSettings');
+            const isChimeMode = document.querySelector('input[name="notifSound"]:checked').value === 'chime';
+            chimeSettings.style.display = isChimeMode ? 'block' : 'none';
+        }
+        
+        function updateChimeSound() {
+            chimeSound = document.getElementById('chimeSelect').value;
+        }
+        
+        function testChime() {
+            playChime();
+        }
+        
+        function saveSettings() {
+            // Get selected notification mode
+            notificationMode = document.querySelector('input[name="notifSound"]:checked').value;
+            chimeSound = document.getElementById('chimeSelect').value;
+            
+            // Save to localStorage
+            localStorage.setItem('notificationMode', notificationMode);
+            localStorage.setItem('chimeSound', chimeSound);
+            
+            closeSettings();
+        }
+        
+        // Speak tab name function
+        async function speakTabName(tabId) {
+            if (isMuted) return;
+            
+            // Get tab name
+            const tab = document.getElementById(tabId);
+            if (!tab) return;
+            
+            const tabName = tab.querySelector('.tab-name').textContent;
+            const voiceSelect = document.getElementById('voiceSelect');
+            const selectedVoice = voiceSelect ? voiceSelect.value : 'en-US-AriaNeural';
+            
+            // Announce which tab received a response
+            const announcement = `${tabName} responded`;
+            
+            try {
+                const response = await fetch('/tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text: announcement,
+                        voice: selectedVoice
+                    })
+                });
+                
+                if (response.ok) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    // Play the audio
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                    
+                    // Clean up
+                    audio.addEventListener('ended', () => {
+                        URL.revokeObjectURL(audioUrl);
+                    });
+                }
+            } catch (error) {
+                console.error('Error speaking tab name:', error);
+            }
+        }
+        
         // Terminal preview functionality
         let terminalContents = {
             'tab_1': '',
@@ -1458,7 +1665,7 @@ HTML_TEMPLATE = '''
     </script>
     
     <!-- Version -->
-    <div class="version">v2.1.0</div>
+    <div class="version">v2.2.0</div>
 </body>
 </html>
 '''

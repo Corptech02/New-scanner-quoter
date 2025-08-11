@@ -5,6 +5,19 @@ All notable changes to the Multi-Tab Claude Voice Bot will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-08-11
+
+### Added
+- Settings button with configuration panel
+- Multiple chime sound options (Default, Bell, Ding, Soft)
+- Voice announcement mode - speaks tab name instead of chime
+- Settings persistence in localStorage
+- Test sound button in settings
+
+### Changed
+- Notification system now supports both chime and voice modes
+- Chime function accepts tab ID for voice announcements
+
 ## [2.1.0] - 2025-08-11
 
 ### Added
