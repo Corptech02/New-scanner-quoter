@@ -447,6 +447,56 @@ def scan_geico_site():
                 is_login_page = 'manage-my-policy' in current_url or 'login' in current_url
                 
                 if is_login_page:
+                    # Perform automatic login if not already logged in
+                    try:
+                        # Look for username field
+                        username_field = None
+                        username_fields = driver.find_elements(By.XPATH, "//input[@type='text' or @type='email' or @name='username' or @id='username' or contains(@placeholder, 'username') or contains(@placeholder, 'Username') or contains(@aria-label, 'username') or contains(@aria-label, 'Username')]")
+                        for field in username_fields:
+                            if field.is_displayed():
+                                username_field = field
+                                break
+                        
+                        # Look for password field
+                        password_field = None
+                        password_fields = driver.find_elements(By.XPATH, "//input[@type='password' or @name='password' or @id='password']")
+                        for field in password_fields:
+                            if field.is_displayed():
+                                password_field = field
+                                break
+                        
+                        # If both fields found and empty, perform login
+                        if username_field and password_field:
+                            # Check if fields are empty (not already logged in)
+                            if not username_field.get_attribute('value'):
+                                print("[DEBUG] Performing automatic login")
+                                
+                                # Click username field and type username
+                                username_field.click()
+                                time.sleep(0.5)
+                                username_field.clear()
+                                username_field.send_keys("I017346")
+                                time.sleep(1)
+                                
+                                # Click password field and type password
+                                password_field.click()
+                                time.sleep(0.5)
+                                password_field.clear()
+                                password_field.send_keys("25Nickc124")
+                                time.sleep(1)
+                                
+                                # Find and click login button
+                                login_buttons = driver.find_elements(By.XPATH, "//button[contains(text(), 'Sign') or contains(text(), 'sign') or contains(text(), 'Log') or contains(text(), 'log')]")
+                                for button in login_buttons:
+                                    if button.is_displayed():
+                                        button.click()
+                                        print("[DEBUG] Login button clicked")
+                                        time.sleep(3)  # Wait for login to process
+                                        break
+                    except Exception as e:
+                        print(f"[DEBUG] Error during auto-login: {e}")
+                    
+                    # Continue with element detection for visual feedback
                     # Find username field
                     try:
                         username_fields = driver.find_elements(By.XPATH, "//input[@type='text' or @type='email' or @name='username' or @id='username' or contains(@placeholder, 'username') or contains(@placeholder, 'Username') or contains(@aria-label, 'username') or contains(@aria-label, 'Username')]")
