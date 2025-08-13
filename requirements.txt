@@ -15,3 +15,7 @@ pyOpenSSL==23.3.0
 
 # Optional: For development
 python-dotenv==1.0.0
+
+# Production hosting
+eventlet==0.33.3
+gunicorn==21.2.0

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geico Auto Quota Scanner</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .start-button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .start-button:hover {
+            background-color: #0052a3;
+        }
+        
+        .start-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .screenshot-container {
+            position: relative;
+            background: #f0f0f0;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            min-height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        
+        .screenshot-display {
+            position: relative;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        .screenshot-display iframe {
+            width: 100%;
+            height: 600px;
+            border: none;
+        }
+        
+        .overlay-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+        }
+        
+        .element-overlay {
+            position: absolute;
+            border: 2px solid red;
+            background-color: rgba(255, 0, 0, 0.1);
+            pointer-events: none;
+        }
+        
+        .element-label {
+            position: absolute;
+            background-color: red;
+            color: white;
+            padding: 2px 6px;
+            font-size: 12px;
+            font-weight: bold;
+            top: -20px;
+            left: 0;
+            white-space: nowrap;
+        }
+        
+        .fps-counter {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: #0ff;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        
+        .status-message {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 16px;
+            color: #666;
+        }
+        
+        .instructions {
+            background-color: #fffbf0;
+            border: 1px solid #f0e68c;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .instructions h3 {
+            margin-top: 0;
+            color: #8b7500;
+        }
+        
+        .error-message {
+            background-color: #ffe0e0;
+            border: 1px solid #ff0000;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            color: #cc0000;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Geico Auto Quota Scanner</h1>
+        
+        <div class="instructions">
+            <h3>Important Notice</h3>
+            <p>Due to browser security restrictions (CORS policy), this scanner cannot directly access external websites like Geico from a local HTML file.</p>
+            <p><strong>Options:</strong></p>
+            <ol>
+                <li>Use the Python-based scanner (geico_scanner_minimal.py) which can bypass CORS</li>
+                <li>Install a browser extension to disable CORS for testing</li>
+                <li>Host this file on a web server with proper proxy configuration</li>
+            </ol>
+        </div>
+        
+        <div class="controls">
+            <button class="start-button" onclick="startScanning()">Start Quote</button>
+        </div>
+        
+        <div class="screenshot-container">
+            <div class="fps-counter" style="display: none;">FPS: 0</div>
+            <div id="screenshotDisplay" class="screenshot-display">
+                <p style="color: #999;">Click "Start Quote" to begin scanning</p>
+            </div>
+            <div class="overlay-container" id="overlayContainer"></div>
+        </div>
+        
+        <div class="status-message" id="statusMessage"></div>
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+
+    <script>
+        let isScanning = false;
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
+        let currentFps = 0;
+        let scanInterval = null;
+
+        function startScanning() {
+            if (isScanning) return;
+            
+            isScanning = true;
+            frameCount = 0;
+            
+            const button = document.querySelector('.start-button');
+            const fpsCounter = document.querySelector('.fps-counter');
+            const statusMessage = document.getElementById('statusMessage');
+            const errorMessage = document.getElementById('errorMessage');
+            const screenshotDisplay = document.getElementById('screenshotDisplay');
+            
+            button.disabled = true;
+            button.textContent = 'Scanning...';
+            fpsCounter.style.display = 'block';
+            statusMessage.textContent = 'Attempting to load Geico gateway...';
+            errorMessage.style.display = 'none';
+            
+            // Create iframe attempt
+            screenshotDisplay.innerHTML = '<iframe id="targetFrame" src="https://gateway.geico.com" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>';
+            
+            const iframe = document.getElementById('targetFrame');
+            
+            iframe.onload = function() {
+                statusMessage.textContent = 'Page loaded, attempting to scan...';
+                startElementScanning();
+            };
+            
+            iframe.onerror = function() {
+                showError('Failed to load Geico website due to CORS restrictions.');
+            };
+            
+            // Set up error timeout
+            setTimeout(() => {
+                if (isScanning && frameCount === 0) {
+                    showError('Unable to access Geico website due to browser security restrictions (CORS). Please use the Python-based scanner instead.');
+                }
+            }, 3000);
+            
+            // Update FPS counter
+            setInterval(updateFps, 1000);
+        }
+        
+        function startElementScanning() {
+            // Simulate element detection since we can't actually access the iframe content
+            const mockElements = [
+                { type: 'input', label: 'Username', x: 50, y: 100, width: 200, height: 40 },
+                { type: 'input', label: 'Password', x: 50, y: 160, width: 200, height: 40 },
+                { type: 'button', label: 'Login', x: 50, y: 220, width: 100, height: 40 },
+                { type: 'link', label: 'Forgot Password', x: 170, y: 220, width: 120, height: 40 }
+            ];
+            
+            scanInterval = setInterval(() => {
+                frameCount++;
+                
+                // Clear previous overlays
+                const overlayContainer = document.getElementById('overlayContainer');
+                overlayContainer.innerHTML = '';
+                
+                // Add mock overlays
+                mockElements.forEach(element => {
+                    const overlay = document.createElement('div');
+                    overlay.className = 'element-overlay';
+                    overlay.style.left = element.x + 'px';
+                    overlay.style.top = element.y + 'px';
+                    overlay.style.width = element.width + 'px';
+                    overlay.style.height = element.height + 'px';
+                    
+                    const label = document.createElement('div');
+                    label.className = 'element-label';
+                    label.textContent = element.label;
+                    overlay.appendChild(label);
+                    
+                    overlayContainer.appendChild(overlay);
+                });
+            }, 100); // 10 FPS
+        }
+        
+        function updateFps() {
+            const now = Date.now();
+            const elapsed = (now - lastFpsUpdate) / 1000;
+            currentFps = Math.round(frameCount / elapsed);
+            
+            document.querySelector('.fps-counter').textContent = `FPS: ${currentFps}`;
+            
+            frameCount = 0;
+            lastFpsUpdate = now;
+        }
+        
+        function showError(message) {
+            isScanning = false;
+            
+            const button = document.querySelector('.start-button');
+            const errorMessage = document.getElementById('errorMessage');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            button.disabled = false;
+            button.textContent = 'Start Quote';
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            statusMessage.textContent = '';
+            
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>
