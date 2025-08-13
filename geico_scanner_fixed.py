@@ -4,7 +4,7 @@ Geico Auto Quota Scanner - Web Interface
 A web-based scanner that captures screenshots and detects elements on Geico's website
 """
 
-from flask import Flask, render_template_string, jsonify, Response
+from flask import Flask, render_template_string, jsonify, Response, request
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -19,6 +19,7 @@ import threading
 import json
 import subprocess
 from PIL import Image
+import sys
 
 app = Flask(__name__)
 
@@ -40,35 +41,69 @@ HTML_TEMPLATE = '''
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Geico Auto Quota Scanner</title>
     <style>
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: white;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-muted: #999;
+            --border-color: #ddd;
+            --shadow-color: rgba(0,0,0,0.1);
+            --button-bg: #0066cc;
+            --button-bg-hover: #0052a3;
+            --container-bg: #f0f0f0;
+        }
+        
+        body.dark-theme {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2a2a2a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #b0b0b0;
+            --text-muted: #707070;
+            --border-color: #444;
+            --shadow-color: rgba(0,0,0,0.5);
+            --button-bg: #0080ff;
+            --button-bg-hover: #0066cc;
+            --container-bg: #333333;
+        }
+        
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
         }
         
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background: white;
+            background: var(--bg-secondary);
             padding: 30px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px var(--shadow-color);
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
         }
         
         h1 {
             text-align: center;
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 30px;
+            transition: color 0.3s ease;
         }
         
         .controls {
             text-align: center;
             margin-bottom: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
         }
         
         .start-button {
-            background-color: #0066cc;
+            background-color: var(--button-bg);
             color: white;
             border: none;
             padding: 15px 40px;
@@ -79,7 +114,7 @@ HTML_TEMPLATE = '''
         }
         
         .start-button:hover {
-            background-color: #0052a3;
+            background-color: var(--button-bg-hover);
         }
         
         .start-button:disabled {
@@ -87,16 +122,51 @@ HTML_TEMPLATE = '''
             cursor: not-allowed;
         }
         
+        .theme-toggle {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background-color: var(--border-color);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .theme-toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background-color: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        body.dark-theme .theme-toggle-slider {
+            transform: translateX(30px);
+        }
+        
+        .theme-toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
         .screenshot-container {
             position: relative;
-            background: #f0f0f0;
-            border: 2px solid #ddd;
+            background: var(--container-bg);
+            border: 2px solid var(--border-color);
             border-radius: 5px;
             min-height: 600px;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
         
         #screenshotImage {
@@ -114,25 +184,48 @@ HTML_TEMPLATE = '''
             pointer-events: none;
         }
         
+        .overlay-container .element-overlay {
+            pointer-events: auto !important;
+        }
+        
         .element-overlay {
             position: absolute;
             border: 3px solid red;
             background-color: rgba(255, 0, 0, 0.2);
-            pointer-events: none;
-            transition: all 0.1s ease;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .element-overlay:hover {
+            background-color: rgba(255, 0, 0, 0.4);
+            border-color: #ff3333;
+            z-index: 1000;
         }
         
         .element-label {
             position: absolute;
-            background-color: red;
+            background-color: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 4px 8px;
-            font-size: 12px;
+            padding: 6px 10px;
+            font-size: 13px;
             font-weight: bold;
-            top: -25px;
-            left: 0;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
             white-space: nowrap;
-            border-radius: 3px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            z-index: 1001;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        
+        .element-overlay:hover .element-label {
+            opacity: 1;
+            visibility: visible;
         }
         
         .fps-counter {
@@ -152,12 +245,49 @@ HTML_TEMPLATE = '''
             text-align: center;
             margin-top: 20px;
             font-size: 16px;
-            color: #666;
+            color: var(--text-secondary);
+            transition: color 0.3s ease;
         }
         
         .placeholder-message {
-            color: #999;
+            color: var(--text-muted);
             font-size: 18px;
+            transition: color 0.3s ease;
+        }
+        
+        .scroll-controls {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+        
+        .scroll-button {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: var(--button-bg);
+            color: white;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: background-color 0.3s, transform 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .scroll-button:hover {
+            background-color: var(--button-bg-hover);
+            transform: scale(1.1);
+        }
+        
+        .scroll-button:active {
+            transform: scale(0.95);
         }
     </style>
 </head>
@@ -167,6 +297,12 @@ HTML_TEMPLATE = '''
         
         <div class="controls">
             <button class="start-button" onclick="startScanning()">Start Quote</button>
+            <label class="theme-toggle-label">
+                <span>Dark Theme</span>
+                <div class="theme-toggle" onclick="toggleTheme()">
+                    <div class="theme-toggle-slider"></div>
+                </div>
+            </label>
         </div>
         
         <div class="screenshot-container">
@@ -179,13 +315,50 @@ HTML_TEMPLATE = '''
         
         <div class="status-message" id="statusMessage"></div>
     </div>
+    
+    <div class="scroll-controls" id="scrollControls" style="display: none;">
+        <button class="scroll-button" onclick="scrollPage('up')" title="Scroll Up">↑</button>
+        <button class="scroll-button" onclick="scrollPage('down')" title="Scroll Down">↓</button>
+    </div>
 
     <script>
         let isScanning = false;
         let updateInterval = null;
         
+        // Initialize theme from localStorage
+        if (localStorage.getItem('darkTheme') === 'true') {
+            document.body.classList.add('dark-theme');
+        }
+        
+        function toggleTheme() {
+            document.body.classList.toggle('dark-theme');
+            const isDark = document.body.classList.contains('dark-theme');
+            localStorage.setItem('darkTheme', isDark.toString());
+        }
+        
+        function scrollPage(direction) {
+            fetch('/scroll-page', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ direction: direction })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Scroll result:', data);
+            })
+            .catch(error => {
+                console.error('Error scrolling:', error);
+            });
+        }
+        
         function startScanning() {
-            if (isScanning) return;
+            console.log('Start scanning clicked');
+            if (isScanning) {
+                console.log('Already scanning, returning');
+                return;
+            }
             
             isScanning = true;
             const button = document.querySelector('.start-button');
@@ -193,37 +366,57 @@ HTML_TEMPLATE = '''
             button.textContent = 'Scanning...';
             
             document.getElementById('fpsCounter').style.display = 'block';
+            document.getElementById('scrollControls').style.display = 'flex';
             document.getElementById('statusMessage').textContent = 'Initializing scanner...';
             
+            console.log('Sending POST to /start-scan');
             fetch('/start-scan', { method: 'POST' })
-                .then(response => response.json())
+                .then(response => {
+                    console.log('Response received:', response);
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        return response.json();
+                    } else {
+                        return response.text().then(text => {
+                            throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}...`);
+                        });
+                    }
+                })
                 .then(data => {
+                    console.log('Data received:', data);
                     if (data.status === 'started') {
                         document.getElementById('statusMessage').textContent = 'Scanner started. Loading Geico website...';
+                        console.log('Starting screenshot updates');
                         startUpdating();
+                    } else {
+                        console.log('Unexpected status:', data.status);
                     }
                 })
                 .catch(error => {
                     console.error('Error starting scan:', error);
-                    document.getElementById('statusMessage').textContent = 'Error starting scanner';
+                    document.getElementById('statusMessage').textContent = 'Error starting scanner: ' + error.message;
                     resetButton();
                 });
         }
         
         function startUpdating() {
+            console.log('startUpdating called - setting up interval');
             updateInterval = setInterval(() => {
                 fetch('/get-screenshot')
                     .then(response => response.json())
                     .then(data => {
+                        console.log('Screenshot data received:', data.screenshot ? 'has screenshot' : 'no screenshot', 'elements:', data.elements ? data.elements.length : 0);
                         if (data.screenshot) {
                             updateScreenshot(data.screenshot, data.elements);
                             document.getElementById('fpsCounter').textContent = `FPS: ${data.fps || 0}`;
+                        } else {
+                            console.log('No screenshot in response');
                         }
                     })
                     .catch(error => {
                         console.error('Error getting screenshot:', error);
                     });
-            }, 100); // Update every 100ms for ~10 FPS
+            }, 50); // Update every 50ms for much higher FPS
         }
         
         function updateScreenshot(screenshotData, elements) {
@@ -272,6 +465,46 @@ HTML_TEMPLATE = '''
                         label.textContent = element.label;
                         overlay.appendChild(label);
                         
+                        // Add click handler
+                        overlay.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
+                            console.log('Overlay clicked:', element.label, 'at', element.x + element.width/2, element.y + element.height/2);
+                            
+                            // Show visual feedback
+                            overlay.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+                            overlay.style.borderColor = '#00ff00';
+                            
+                            // Send click request to backend
+                            console.log('Sending click request for:', element.label);
+                            fetch('/click-element', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({
+                                    x: element.x + element.width / 2,
+                                    y: element.y + element.height / 2,
+                                    label: element.label
+                                })
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                console.log('Click result:', data);
+                                // Reset visual feedback after a moment
+                                setTimeout(() => {
+                                    overlay.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+                                    overlay.style.borderColor = 'red';
+                                }, 300);
+                            })
+                            .catch(error => {
+                                console.error('Error clicking element:', error);
+                                overlay.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+                                overlay.style.borderColor = 'red';
+                            });
+                        });
+                        
                         overlayContainer.appendChild(overlay);
                     });
                 }
@@ -317,26 +550,45 @@ def index():
 
 @app.route('/start-scan', methods=['POST'])
 def start_scan():
-    global driver, is_scanning, scan_thread
-    
-    # Clean up any existing browser instance first
-    if driver:
-        try:
-            driver.quit()
-        except:
-            pass
-        driver = None
-    
-    # Wait a bit for any existing scan to fully stop
-    if is_scanning:
-        is_scanning = False
-        time.sleep(0.5)
-    
-    is_scanning = True
-    scan_thread = threading.Thread(target=scan_geico_site)
-    scan_thread.start()
-    
-    return jsonify({'status': 'started'})
+    try:
+        global driver, is_scanning, scan_thread
+        
+        print("[API] Start scan requested", flush=True)
+        print(f"[API] Request method: {request.method}", flush=True)
+        print(f"[API] Request headers: {dict(request.headers)}", flush=True)
+        print(f"[API] Request data: {request.get_data()}", flush=True)
+        sys.stdout.flush()
+        
+        # Clean up any existing browser instance first
+        if driver:
+            print("[API] Cleaning up existing driver")
+            try:
+                driver.quit()
+            except:
+                pass
+            driver = None
+        
+        # Wait a bit for any existing scan to fully stop
+        if is_scanning:
+            print("[API] Stopping existing scan")
+            is_scanning = False
+            time.sleep(0.5)
+        
+        print("[API] Starting new scan thread")
+        is_scanning = True
+        scan_thread = threading.Thread(target=scan_geico_site)
+        scan_thread.start()
+        
+        print("[API] Scan thread started, returning JSON response")
+        response = jsonify({'status': 'started'})
+        print(f"[API] Response: {response.get_data()}", flush=True)
+        return response
+    except Exception as e:
+        print(f"[ERROR] Exception in start_scan: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        error_response = jsonify({'status': 'error', 'message': str(e)})
+        return error_response, 500
 
 @app.route('/stop-scan', methods=['POST'])
 def stop_scan():
@@ -367,8 +619,125 @@ def get_status():
     global current_status
     return jsonify({'status': current_status})
 
+@app.route('/click-element', methods=['POST'])
+def click_element():
+    global driver, current_status
+    
+    if not driver:
+        return jsonify({'status': 'error', 'message': 'No active browser session'})
+    
+    try:
+        data = request.get_json()
+        x = data.get('x')
+        y = data.get('y')
+        label = data.get('label', 'Unknown')
+        
+        print(f"[DEBUG] Clicking element: {label} at ({x}, {y})")
+        current_status = f"Clicking: {label}"
+        
+        # Use JavaScript to click at exact coordinates
+        click_script = """
+        var x = arguments[0];
+        var y = arguments[1];
+        
+        // Find element at coordinates
+        var element = document.elementFromPoint(x - window.scrollX, y - window.scrollY);
+        
+        if (element) {
+            // Visual feedback
+            var originalBg = element.style.backgroundColor;
+            var originalBorder = element.style.border;
+            element.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+            element.style.border = '3px solid #00ff00';
+            
+            // Click the element
+            element.click();
+            
+            // Also dispatch mouse events for better compatibility
+            var clickEvent = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: x - window.scrollX,
+                clientY: y - window.scrollY
+            });
+            element.dispatchEvent(clickEvent);
+            
+            // Reset style after a moment
+            setTimeout(function() {
+                element.style.backgroundColor = originalBg;
+                element.style.border = originalBorder;
+            }, 500);
+            
+            return {success: true, element: element.tagName, text: element.textContent.substring(0, 50)};
+        } else {
+            return {success: false, message: 'No element found at coordinates'};
+        }
+        """
+        
+        result = driver.execute_script(click_script, x, y)
+        print(f"[DEBUG] Click result: {result}")
+        
+        # Wait a moment for any page changes
+        time.sleep(0.5)
+        
+        return jsonify({
+            'status': 'success',
+            'result': result,
+            'clicked': label
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Click failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
+@app.route('/scroll-page', methods=['POST'])
+def scroll_page():
+    global driver, current_status
+    
+    if not driver:
+        return jsonify({'status': 'error', 'message': 'No active browser session'})
+    
+    try:
+        data = request.get_json()
+        direction = data.get('direction', 'down')
+        
+        print(f"[DEBUG] Scrolling page: {direction}")
+        current_status = f"Scrolling {direction}..."
+        
+        # Scroll the page
+        if direction == 'down':
+            driver.execute_script("window.scrollBy(0, 300);")
+        elif direction == 'up':
+            driver.execute_script("window.scrollBy(0, -300);")
+        
+        # Wait a moment for elements to update
+        time.sleep(0.3)
+        
+        # Get current scroll position
+        scroll_pos = driver.execute_script("return {top: window.pageYOffset, height: document.documentElement.scrollHeight, viewport: window.innerHeight};")
+        
+        return jsonify({
+            'status': 'success',
+            'direction': direction,
+            'scroll_position': scroll_pos
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Scroll failed: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+
 def scan_geico_site():
     global driver, is_scanning, current_screenshot, detected_elements, fps_counter, last_fps_time, current_status
+    
+    print("\n[DEBUG] scan_geico_site() function called!", flush=True)
+    sys.stdout.flush()
     
     # Kill any existing Chrome processes first - more aggressive
     import subprocess
@@ -376,7 +745,8 @@ def scan_geico_site():
     import tempfile
     import shutil
     
-    print("[DEBUG] Killing existing Chrome processes...")
+    print("[DEBUG] Killing existing Chrome processes...", flush=True)
+    sys.stdout.flush()
     subprocess.run(['pkill', '-9', '-f', 'chrome'], capture_output=True)
     subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True)
     subprocess.run(['pkill', '-9', '-f', 'chromedriver'], capture_output=True)
@@ -403,6 +773,10 @@ def scan_geico_site():
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         # Re-enable headless for server environment
         chrome_options.add_argument('--headless=new')
+        # Add more arguments to fix Chrome startup issues
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--remote-debugging-port=9222')
+        chrome_options.add_argument('--disable-extensions')
         print("[DEBUG] Running in headless mode for server environment")
         
         # Try to create a unique user data directory
@@ -532,27 +906,40 @@ def scan_geico_site():
                 username_element = None
                 password_element = None
                 
+                print(f"\n[DEBUG LOGIN SCAN] Starting login field detection on URL: {driver.current_url}", flush=True)
+                sys.stdout.flush()
+                
                 # Check for username field
                 try:
                     username_fields = driver.find_elements(By.XPATH, "//input[@type='text' or @type='email' or @name='username' or @name='j_username' or @id='username' or contains(@placeholder, 'username') or contains(@placeholder, 'Username') or contains(@aria-label, 'username') or contains(@aria-label, 'Username')]")
+                    print(f"[DEBUG LOGIN SCAN] Found {len(username_fields)} potential username fields")
                     for field in username_fields:
                         if field.is_displayed():
                             has_username_field = True
                             username_element = field
+                            print(f"[DEBUG LOGIN SCAN] Username field found! Type: {field.get_attribute('type')}, Name: {field.get_attribute('name')}, ID: {field.get_attribute('id')}")
                             break
-                except:
-                    pass
+                    if not has_username_field:
+                        print("[DEBUG LOGIN SCAN] No visible username field found")
+                except Exception as e:
+                    print(f"[DEBUG LOGIN SCAN] Error finding username field: {e}")
                 
                 # Check for password field
                 try:
                     password_fields = driver.find_elements(By.XPATH, "//input[@type='password' or @name='password' or @name='j_password' or @id='password']")
+                    print(f"[DEBUG LOGIN SCAN] Found {len(password_fields)} potential password fields")
                     for field in password_fields:
                         if field.is_displayed():
                             has_password_field = True
                             password_element = field
+                            print(f"[DEBUG LOGIN SCAN] Password field found! Type: {field.get_attribute('type')}, Name: {field.get_attribute('name')}, ID: {field.get_attribute('id')}")
                             break
-                except:
-                    pass
+                    if not has_password_field:
+                        print("[DEBUG LOGIN SCAN] No visible password field found")
+                except Exception as e:
+                    print(f"[DEBUG LOGIN SCAN] Error finding password field: {e}")
+                
+                print(f"[DEBUG LOGIN SCAN] Detection complete. Has username: {has_username_field}, Has password: {has_password_field}")
                 
                 # If we found both username and password fields, try to auto-fill them
                 if has_username_field and has_password_field and not driver.execute_script("return window.geicoLoginAttempted || false"):
@@ -560,6 +947,14 @@ def scan_geico_site():
                     driver.execute_script("window.geicoLoginAttempted = true;")
                     
                     print(f"[DEBUG] Found login fields on page: {driver.current_url}")
+                    print("[DEBUG] Waiting 5 seconds before auto-fill so you can see the highlighted fields...")
+                    
+                    # Wait 5 seconds with countdown so user can see the highlighted login fields
+                    for i in range(5, 0, -1):
+                        current_status = f"Login detected - Auto-fill in {i} seconds..."
+                        print(f"[DEBUG] Countdown: {i} seconds remaining...")
+                        time.sleep(1)
+                    
                     print("[DEBUG] Attempting to auto-fill login credentials...")
                     current_status = "Login detected - Starting auto-fill..."
                     
@@ -900,119 +1295,544 @@ def scan_geico_site():
                 # Now continue with element detection for visual feedback
                 # This will show the red boxes around detected elements
                 
-                # Find username field for visual display
-                try:
-                    username_fields = driver.find_elements(By.XPATH, "//input[@type='text' or @type='email' or @name='username' or @name='j_username' or @id='username' or contains(@placeholder, 'username') or contains(@placeholder, 'Username') or contains(@aria-label, 'username') or contains(@aria-label, 'Username')]")
-                    for field in username_fields:
-                        if field.is_displayed():
-                            rect = field.rect
-                            # Only add if element has valid position and size
-                            if rect['width'] > 0 and rect['height'] > 0:
-                                elements_found.append({
-                                    'label': 'Username',
-                                    'x': rect['x'],
-                                    'y': rect['y'],
-                                    'width': rect['width'],
-                                    'height': rect['height']
-                                })
-                                break
-                except:
-                    pass
+                # ENHANCED ELEMENT SCANNING - Smart filtering to prevent duplicates
+                # Keep track of already found elements
+                elements_found = []
                 
-                # Find password field
-                try:
-                    password_fields = driver.find_elements(By.XPATH, "//input[@type='password' or @name='password' or @name='j_password' or @id='password']")
-                    for field in password_fields:
-                        if field.is_displayed():
-                            rect = field.rect
-                            if rect['width'] > 0 and rect['height'] > 0:
-                                elements_found.append({
-                                    'label': 'Password',
-                                    'x': rect['x'],
-                                    'y': rect['y'],
-                                    'width': rect['width'],
-                                    'height': rect['height']
-                                })
-                                break
-                except:
-                    pass
+                # SPECIAL HANDLING FOR LOGIN PAGE - Add username and password fields
+                if has_username_field and has_password_field:
+                    print(f"[DEBUG LOGIN SCAN] Login page detected! Username field: {username_element is not None}, Password field: {password_element is not None}")
+                    
+                    # Add username field
+                    if username_element and username_element.is_displayed():
+                        rect = username_element.rect
+                        print(f"[DEBUG LOGIN SCAN] Username field rect: x={rect['x']}, y={rect['y']}, width={rect['width']}, height={rect['height']}")
+                        if rect['width'] > 20 and rect['height'] > 10:
+                            elements_found.append({
+                                'label': 'Username',
+                                'x': rect['x'],
+                                'y': rect['y'],
+                                'width': rect['width'],
+                                'height': rect['height']
+                            })
+                            print("[DEBUG LOGIN SCAN] Username field added to elements_found")
+                        else:
+                            print(f"[DEBUG LOGIN SCAN] Username field too small: {rect['width']}x{rect['height']}")
+                    else:
+                        print(f"[DEBUG LOGIN SCAN] Username element not displayed or None: {username_element}")
+                    
+                    # Add password field
+                    if password_element and password_element.is_displayed():
+                        rect = password_element.rect
+                        print(f"[DEBUG LOGIN SCAN] Password field rect: x={rect['x']}, y={rect['y']}, width={rect['width']}, height={rect['height']}")
+                        if rect['width'] > 20 and rect['height'] > 10:
+                            elements_found.append({
+                                'label': 'Password',
+                                'x': rect['x'],
+                                'y': rect['y'],
+                                'width': rect['width'],
+                                'height': rect['height']
+                            })
+                            print("[DEBUG LOGIN SCAN] Password field added to elements_found")
+                        else:
+                            print(f"[DEBUG LOGIN SCAN] Password field too small: {rect['width']}x{rect['height']}")
+                    else:
+                        print(f"[DEBUG LOGIN SCAN] Password element not displayed or None: {password_element}")
+                    
+                    # Also find and add the Sign In button on login page
+                    try:
+                        sign_in_buttons = driver.find_elements(By.XPATH, "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'sign') or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')] | //input[@type='submit']")
+                        for btn in sign_in_buttons:
+                            if btn.is_displayed():
+                                rect = btn.rect
+                                if rect['width'] > 30 and rect['height'] > 20:
+                                    btn_text = btn.text.strip() or btn.get_attribute('value') or 'Sign In'
+                                    elements_found.append({
+                                        'label': btn_text[:20],
+                                        'x': rect['x'],
+                                        'y': rect['y'],
+                                        'width': rect['width'],
+                                        'height': rect['height']
+                                    })
+                                    break  # Only add the first sign-in button found
+                    except:
+                        pass
                 
-                # Find Sign In button - avoid duplicates
-                try:
-                    signin_buttons = driver.find_elements(By.XPATH, "//button[contains(text(), 'Sign') or contains(text(), 'sign') or contains(text(), 'Log') or contains(text(), 'log')]")
-                    seen_positions = set()
-                    for button in signin_buttons:
-                        if button.is_displayed():
-                            rect = button.rect
-                            # Create a position key to check for duplicates
-                            pos_key = f"{rect['x']},{rect['y']},{rect['width']},{rect['height']}"
-                            if pos_key not in seen_positions and rect['width'] > 0 and rect['height'] > 0:
-                                seen_positions.add(pos_key)
-                                elements_found.append({
-                                    'label': 'Sign In',
-                                    'x': rect['x'],
-                                    'y': rect['y'],
-                                    'width': rect['width'],
-                                    'height': rect['height']
-                                })
-                                break  # Only add the first visible sign in button
-                except:
-                    pass
+                def is_element_overlapping(new_elem, existing_elem):
+                    """Check if two elements overlap significantly"""
+                    # Calculate the overlap area
+                    x_overlap = max(0, min(new_elem['x'] + new_elem['width'], existing_elem['x'] + existing_elem['width']) - 
+                                   max(new_elem['x'], existing_elem['x']))
+                    y_overlap = max(0, min(new_elem['y'] + new_elem['height'], existing_elem['y'] + existing_elem['height']) - 
+                                   max(new_elem['y'], existing_elem['y']))
+                    
+                    overlap_area = x_overlap * y_overlap
+                    new_area = new_elem['width'] * new_elem['height']
+                    
+                    # If more than 70% overlap, consider it duplicate
+                    return overlap_area > (new_area * 0.7)
                 
-                # Find Forgot Password link
-                try:
-                    forgot_links = driver.find_elements(By.XPATH, "//a[contains(text(), 'Forgot') or contains(text(), 'forgot')]")
-                    for link in forgot_links:
-                        if link.is_displayed():
-                            rect = link.rect
-                            if rect['width'] > 0 and rect['height'] > 0:
-                                elements_found.append({
-                                    'label': 'Forgot Password',
-                                    'x': rect['x'],
-                                    'y': rect['y'],
-                                    'width': rect['width'],
-                                    'height': rect['height']
-                                })
-                                break
-                except:
-                    pass
+                def is_element_contained(child, parent):
+                    """Check if child element is fully contained within parent"""
+                    return (child['x'] >= parent['x'] and 
+                            child['y'] >= parent['y'] and 
+                            child['x'] + child['width'] <= parent['x'] + parent['width'] and 
+                            child['y'] + child['height'] <= parent['y'] + parent['height'])
                 
-                # Also detect other page elements (ZIP code, quote buttons, etc.)
-                # Find ZIP code input
-                try:
-                    zip_inputs = driver.find_elements(By.XPATH, "//input[contains(@placeholder, 'ZIP') or contains(@placeholder, 'zip') or contains(@name, 'zip')]")
-                    for inp in zip_inputs:
-                        if inp.is_displayed():
-                            rect = inp.rect
-                            if rect['width'] > 0 and rect['height'] > 0:
-                                elements_found.append({
-                                    'label': 'ZIP Code',
-                                    'x': rect['x'],
-                                    'y': rect['y'],
-                                    'width': rect['width'],
-                                    'height': rect['height']
-                                })
-                                break
-                except:
-                    pass
+                def add_unique_element(elem_data):
+                    """Add element only if it's not duplicate/overlapping/contained"""
+                    # Skip elements that are too large (likely containers/backgrounds)
+                    if elem_data['width'] > 800 or elem_data['height'] > 400:
+                        return False
+                    
+                    # Skip elements that are too small
+                    if elem_data['width'] < 15 or elem_data['height'] < 8:
+                        return False
+                    
+                    # Check against existing elements
+                    for existing in elements_found:
+                        # Skip if this element significantly overlaps with existing
+                        if is_element_overlapping(elem_data, existing):
+                            return False
+                        
+                        # Skip if this element is contained within existing
+                        if is_element_contained(elem_data, existing):
+                            return False
+                        
+                        # Skip if existing element is contained within this one
+                        # (keep the smaller, more specific element)
+                        if is_element_contained(existing, elem_data):
+                            return False
+                    
+                    elements_found.append(elem_data)
+                    return True
                 
-                # Find Get Quote button
+                # Find only important input elements (excluding login fields on login page)
                 try:
-                    quote_buttons = driver.find_elements(By.XPATH, "//button[contains(text(), 'Quote') or contains(text(), 'quote')]")
-                    for btn in quote_buttons:
+                    # Always scan inputs
+                    if True:
+                        all_inputs = driver.find_elements(By.TAG_NAME, "input")
+                        for idx, inp in enumerate(all_inputs):
+                            if inp.is_displayed():
+                                rect = inp.rect
+                                if rect['width'] > 20 and rect['height'] > 10:
+                                    # Skip only hidden inputs
+                                    input_type = inp.get_attribute('type') or 'text'
+                                    if input_type in ['hidden']:
+                                        continue
+                                    
+                                    # Skip if this is the username or password field we already added
+                                    if has_username_field and inp == username_element:
+                                        continue
+                                    if has_password_field and inp == password_element:
+                                        continue
+                                    
+                                    placeholder = inp.get_attribute('placeholder') or ''
+                                    name = inp.get_attribute('name') or ''
+                                    id_attr = inp.get_attribute('id') or ''
+                                    
+                                    # Create descriptive label
+                                    label = f"Input [{input_type}]"
+                                    if placeholder:
+                                        label = placeholder
+                                    elif name:
+                                        label = f"Input: {name}"
+                                    elif id_attr:
+                                        label = f"Input: {id_attr}"
+                                    
+                                    add_unique_element({
+                                        'label': label,
+                                        'x': rect['x'],
+                                        'y': rect['y'],
+                                        'width': rect['width'],
+                                        'height': rect['height']
+                                    })
+                except Exception as e:
+                    print(f"Error scanning inputs: {e}")
+                
+                # Find buttons
+                try:
+                    all_buttons = driver.find_elements(By.TAG_NAME, "button")
+                    for btn in all_buttons:
                         if btn.is_displayed():
                             rect = btn.rect
-                            if rect['width'] > 0 and rect['height'] > 0:
-                                elements_found.append({
-                                    'label': 'Get Quote',
+                            if rect['width'] > 30 and rect['height'] > 20:
+                                # Get button text or aria-label
+                                btn_text = btn.text.strip()
+                                if not btn_text:
+                                    btn_text = btn.get_attribute('aria-label') or ''
+                                
+                                # Skip empty buttons
+                                if btn_text:
+                                    add_unique_element({
+                                        'label': f"Button: {btn_text[:20]}",
+                                        'x': rect['x'],
+                                        'y': rect['y'],
+                                        'width': rect['width'],
+                                        'height': rect['height']
+                                    })
+                except Exception as e:
+                    print(f"Error scanning buttons: {e}")
+                
+                # Find important links
+                try:
+                    all_links = driver.find_elements(By.TAG_NAME, "a")
+                    for link in all_links:
+                        if link.is_displayed():
+                            rect = link.rect
+                            # More lenient size limits to capture more links
+                            if rect['width'] > 15 and rect['height'] > 8 and rect['width'] < 500 and rect['height'] < 120:
+                                link_text = link.text.strip()
+                                aria_label = link.get_attribute('aria-label') or ''
+                                
+                                # Skip links without meaningful text
+                                if link_text or aria_label:
+                                    label = link_text[:30] if link_text else aria_label[:30]
+                                    
+                                    # Accept even short labels
+                                    if len(label) > 0:
+                                        add_unique_element({
+                                            'label': f"{label}",
+                                            'x': rect['x'],
+                                            'y': rect['y'],
+                                            'width': rect['width'],
+                                            'height': rect['height']
+                                        })
+                except Exception as e:
+                    print(f"Error scanning links: {e}")
+                
+                # Find select dropdowns
+                try:
+                    all_selects = driver.find_elements(By.TAG_NAME, "select")
+                    for sel in all_selects:
+                        if sel.is_displayed():
+                            rect = sel.rect
+                            if rect['width'] > 30 and rect['height'] > 20:
+                                name = sel.get_attribute('name') or sel.get_attribute('id') or 'Dropdown'
+                                add_unique_element({
+                                    'label': f"Select: {name}",
                                     'x': rect['x'],
                                     'y': rect['y'],
                                     'width': rect['width'],
                                     'height': rect['height']
                                 })
-                                break
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error scanning selects: {e}")
+                
+                # Find textareas
+                try:
+                    all_textareas = driver.find_elements(By.TAG_NAME, "textarea")
+                    for ta in all_textareas:
+                        if ta.is_displayed():
+                            rect = ta.rect
+                            if rect['width'] > 50 and rect['height'] > 30:
+                                placeholder = ta.get_attribute('placeholder') or 'Textarea'
+                                add_unique_element({
+                                    'label': placeholder,
+                                    'x': rect['x'],
+                                    'y': rect['y'],
+                                    'width': rect['width'],
+                                    'height': rect['height']
+                                })
+                except Exception as e:
+                    print(f"Error scanning textareas: {e}")
+                
+                # Find clickable elements with specific text patterns (dashboard elements)
+                try:
+                    # Important text to look for (case insensitive) - ENHANCED LIST
+                    important_texts = [
+                        ("start", "quote"),
+                        ("search", "policy"),
+                        ("look", "prior", "quote"),
+                        ("private", "passenger", "auto"),
+                        ("motorcycle", "atv"),
+                        ("commercial", "auto"),
+                        ("commercial", "truck"),
+                        ("get", "quote"),
+                        ("continue", "quote"),
+                        ("view", "policy"),
+                        ("make", "payment"),
+                        ("starter", "quote"),
+                        ("manage", "policy"),
+                        ("claim", "center"),
+                        ("pay", "bill"),
+                        ("get", "id", "card"),
+                        # New patterns for the missing buttons
+                        ("private", "passenger"),
+                        ("motorcycle",),
+                        ("atv",),
+                        ("off-road",),
+                        ("off", "road"),
+                        ("commercial",),
+                        ("trucking",),
+                        ("auto",)
+                    ]
+                    
+                    # Search for specific clickable elements containing these text patterns
+                    # Only look for buttons, links, and specific clickable elements
+                    for text_parts in important_texts:
+                        # Build XPath that looks for all parts of the text
+                        xpath_conditions = []
+                        for part in text_parts:
+                            xpath_conditions.append(f"contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{part}')")
+                        
+                        # IMPORTANT: Only search in clickable elements, not ALL elements
+                        xpath = f"//button[{' and '.join(xpath_conditions)}] | //a[{' and '.join(xpath_conditions)}] | //span[@role='button' and {' and '.join(xpath_conditions)}] | //div[@role='button' and {' and '.join(xpath_conditions)}] | //div[@tabindex and {' and '.join(xpath_conditions)}]"
+                        try:
+                            pattern_elements = driver.find_elements(By.XPATH, xpath)
+                            for elem in pattern_elements:
+                                if elem.is_displayed():
+                                    rect = elem.rect
+                                    # More strict size filtering
+                                    if rect['width'] > 25 and rect['height'] > 12 and rect['width'] < 600 and rect['height'] < 150:
+                                        elem_text = elem.text.strip()[:40]
+                                        if elem_text:
+                                            add_unique_element({
+                                                'label': f"{elem_text}",
+                                                'x': rect['x'],
+                                                'y': rect['y'],
+                                                'width': rect['width'],
+                                                'height': rect['height']
+                                            })
+                        except:
+                            pass
+                except Exception as e:
+                    print(f"Error scanning clickable text patterns: {e}")
+                
+                # Also search for single important keywords (more flexible)
+                try:
+                    single_keywords = [
+                        "start", "quote", "policy", "search", "private", "passenger",
+                        "motorcycle", "commercial", "auto", "truck", "manage", "claim",
+                        "atv", "off-road", "trucking"  # Added missing keywords
+                    ]
+                    
+                    for keyword in single_keywords:
+                        # ENHANCED: Also search in parent divs and spans
+                        xpath = f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')] | //a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')] | //div[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')] | //span[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]"
+                        try:
+                            keyword_elements = driver.find_elements(By.XPATH, xpath)
+                            for elem in keyword_elements:
+                                if elem.is_displayed():
+                                    rect = elem.rect
+                                    if rect['width'] > 25 and rect['height'] > 12 and rect['width'] < 600 and rect['height'] < 150:
+                                        elem_text = elem.text.strip()[:40]
+                                        if elem_text and len(elem_text) > 3:
+                                            add_unique_element({
+                                                'label': f"{elem_text}",
+                                                'x': rect['x'],
+                                                'y': rect['y'],
+                                                'width': rect['width'],
+                                                'height': rect['height']
+                                            })
+                        except:
+                            pass
+                except Exception as e:
+                    print(f"Error scanning single keywords: {e}")
+                
+                # Find elements with role attributes only (skip onclick to reduce duplicates)
+                try:
+                    # More aggressive search for role elements and clickable divs/spans
+                    role_elements = driver.find_elements(By.XPATH, "//span[@role='button' or @role='link'] | //div[@role='button' or @role='link'] | //*[@onclick] | //*[@ng-click] | //*[contains(@class, 'button')] | //*[contains(@class, 'btn')] | //*[@tabindex]")
+                    for elem in role_elements:
+                        if elem.is_displayed():
+                            rect = elem.rect
+                            # More lenient size limits
+                            if rect['width'] > 15 and rect['height'] > 8 and rect['width'] < 600 and rect['height'] < 150:
+                                elem_text = elem.text.strip()[:30] or elem.get_attribute('aria-label') or ''
+                                if elem_text and len(elem_text) > 2:
+                                    add_unique_element({
+                                        'label': f"{elem_text}",
+                                        'x': rect['x'],
+                                        'y': rect['y'],
+                                        'width': rect['width'],
+                                        'height': rect['height']
+                                    })
+                except Exception as e:
+                    print(f"Error scanning role elements: {e}")
+                
+                # SPECIFIC SEARCH for "products to quote" section and its buttons
+                try:
+                    # First, find the "products to quote" section
+                    products_section_xpath = "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'products to quote')]"
+                    products_sections = driver.find_elements(By.XPATH, products_section_xpath)
+                    
+                    for section in products_sections:
+                        if section.is_displayed():
+                            print(f"[DEBUG] Found 'products to quote' section: {section.text}")
+                            # Find all elements below this section
+                            parent = section
+                            for _ in range(5):  # Go up to 5 levels to find container
+                                parent = parent.find_element(By.XPATH, "..")
+                                # Find all clickable children
+                                children = parent.find_elements(By.XPATH, ".//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'private passenger') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'motorcycle') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'atv') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'off-road') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'commercial') or contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'trucking')]")
+                                for child in children:
+                                    if child.is_displayed():
+                                        rect = child.rect
+                                        if rect['width'] > 20 and rect['height'] > 10:
+                                            elem_text = child.text.strip()
+                                            if elem_text:
+                                                print(f"[DEBUG] Found product button: {elem_text}")
+                                                add_unique_element({
+                                                    'label': elem_text[:40],
+                                                    'x': rect['x'],
+                                                    'y': rect['y'],
+                                                    'width': rect['width'],
+                                                    'height': rect['height']
+                                                })
+                except Exception as e:
+                    print(f"[DEBUG] Error in products to quote section search: {e}")
+                
+                # EXTREMELY AGGRESSIVE SEARCH for all clickable text elements
+                try:
+                    # Search for ALL elements containing these specific product texts
+                    product_keywords = ['private passenger', 'motorcycle', 'atv', 'off-road', 'off road', 'commercial', 'trucking']
+                    
+                    for keyword in product_keywords:
+                        # Search in ALL element types, not just buttons
+                        xpath = f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{keyword}')]"
+                        elements = driver.find_elements(By.XPATH, xpath)
+                        
+                        for elem in elements:
+                            if elem.is_displayed():
+                                rect = elem.rect
+                                if rect['width'] > 20 and rect['height'] > 10 and rect['width'] < 800 and rect['height'] < 200:
+                                    elem_text = elem.text.strip()
+                                    if elem_text:
+                                        # Check if element or parent is clickable
+                                        is_clickable = False
+                                        current = elem
+                                        
+                                        for _ in range(3):  # Check element and up to 2 parents
+                                            try:
+                                                # Check various clickability indicators
+                                                onclick = current.get_attribute('onclick')
+                                                role = current.get_attribute('role')
+                                                tabindex = current.get_attribute('tabindex')
+                                                cursor = driver.execute_script("return window.getComputedStyle(arguments[0]).cursor;", current)
+                                                tag = current.tag_name.lower()
+                                                
+                                                if onclick or role in ['button', 'link'] or tabindex or cursor == 'pointer' or tag in ['a', 'button']:
+                                                    is_clickable = True
+                                                    break
+                                                
+                                                # Go to parent
+                                                current = current.find_element(By.XPATH, "..")
+                                            except:
+                                                break
+                                        
+                                        if is_clickable:
+                                            print(f"[DEBUG] Found clickable product element: {elem_text}")
+                                            add_unique_element({
+                                                'label': elem_text[:40],
+                                                'x': rect['x'],
+                                                'y': rect['y'],
+                                                'width': rect['width'],
+                                                'height': rect['height']
+                                            })
+                                        elif 'auto' in elem_text.lower() or 'motorcycle' in elem_text.lower() or 'commercial' in elem_text.lower():
+                                            # Add these even if not explicitly clickable since they're important
+                                            print(f"[DEBUG] Adding important product text: {elem_text}")
+                                            add_unique_element({
+                                                'label': elem_text[:40],
+                                                'x': rect['x'],
+                                                'y': rect['y'],
+                                                'width': rect['width'],
+                                                'height': rect['height']
+                                            })
+                    
+                    # Additional specific search for the exact phrases
+                    exact_phrases = [
+                        "Private Passenger Auto",
+                        "Motorcycle/ATV/Off-road",
+                        "Commercial Auto/Trucking"
+                    ]
+                    
+                    for phrase in exact_phrases:
+                        # Case-insensitive but exact phrase search
+                        xpath = f"//*[normalize-space(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')) = '{phrase.lower()}']"
+                        elements = driver.find_elements(By.XPATH, xpath)
+                        
+                        for elem in elements:
+                            if elem.is_displayed():
+                                rect = elem.rect
+                                if rect['width'] > 20 and rect['height'] > 10:
+                                    print(f"[DEBUG] Found exact product phrase: {phrase}")
+                                    add_unique_element({
+                                        'label': phrase,
+                                        'x': rect['x'],
+                                        'y': rect['y'],
+                                        'width': rect['width'],
+                                        'height': rect['height']
+                                    })
+                except Exception as e:
+                    print(f"[DEBUG] Error in aggressive product search: {e}")
+                
+                # Continue with the extremely aggressive general search
+                try:
+                    # First, try to find ALL elements that might be clickable
+                    all_elements_xpath = "//*[text() and not(self::script) and not(self::style)]"
+                    all_elements = driver.find_elements(By.XPATH, all_elements_xpath)[:200]  # Increased limit00 for performance
+                    
+                    # Keywords to search for
+                    target_keywords = [
+                        "private passenger", "motorcycle", "atv", "off-road", "off road",
+                        "commercial auto", "commercial trucking", "trucking"
+                    ]
+                    
+                    for elem in all_elements:
+                        try:
+                            if elem.is_displayed():
+                                elem_text = elem.text.strip().lower()
+                                # Check if element contains any of our target keywords
+                                for keyword in target_keywords:
+                                    if keyword in elem_text and len(elem_text) < 100:  # Avoid huge text blocks
+                                        rect = elem.rect
+                                        if rect['width'] > 15 and rect['height'] > 8 and rect['width'] < 800:
+                                            # Check if this element or its parent is clickable
+                                            clickable = False
+                                            current = elem
+                                            
+                                            # Check element and up to 3 parent levels for clickability
+                                            for _ in range(4):
+                                                tag_name = current.tag_name.lower()
+                                                if tag_name in ['a', 'button', 'input']:
+                                                    clickable = True
+                                                    break
+                                                
+                                                # Check for clickable attributes
+                                                onclick = current.get_attribute('onclick')
+                                                role = current.get_attribute('role')
+                                                tabindex = current.get_attribute('tabindex')
+                                                cursor = current.value_of_css_property('cursor')
+                                                
+                                                if onclick or role in ['button', 'link'] or tabindex or cursor == 'pointer':
+                                                    clickable = True
+                                                    break
+                                                
+                                                # Move to parent
+                                                try:
+                                                    current = current.find_element(By.XPATH, '..')
+                                                except:
+                                                    break
+                                            
+                                            if clickable:
+                                                add_unique_element({
+                                                    'label': elem.text.strip()[:50],
+                                                    'x': rect['x'],
+                                                    'y': rect['y'],
+                                                    'width': rect['width'],
+                                                    'height': rect['height']
+                                                })
+                                                break  # Found this keyword, move to next element
+                        except:
+                            continue
+                            
+                except Exception as e:
+                    print(f"Error in aggressive element search: {e}")
+                
+                # Skip cursor:pointer scanning as it creates too many duplicates
+                # The above methods should catch all important clickable elements
                 
                 # Update global detected_elements
                 detected_elements = elements_found
@@ -1029,8 +1849,8 @@ def scan_geico_site():
                     frame_count = 0
                     last_time = current_time
                 
-                # Small delay to achieve ~10 FPS
-                time.sleep(0.1)
+                # Maximum FPS - minimal delay for ~50+ FPS
+                time.sleep(0.01)
                 
             except Exception as e:
                 print(f"Error in scan loop: {e}")
@@ -1075,4 +1895,16 @@ if __name__ == '__main__':
     print("Or from another device: http://192.168.40.232:5558")
     print("Press Ctrl+C to stop the server\n")
     
-    app.run(host='0.0.0.0', port=5558, debug=False)
+    # Enable Flask logging and error handling
+    import logging
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Add CORS headers for debugging
+    @app.after_request
+    def after_request(response):
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        return response
+    
+    app.run(host='0.0.0.0', port=5558, debug=True, use_reloader=False)
