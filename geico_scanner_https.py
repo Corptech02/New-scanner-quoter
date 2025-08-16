@@ -1390,6 +1390,125 @@ def scan_geico_site():
                         import traceback
                         traceback.print_exc()
                 
+                # CHECK IF WE'RE ON COMMERCIAL AUTO PAGE AND NEED TO FILL ZIP CODE
+                # This runs after Commercial Auto/Trucking is clicked
+                if driver.execute_script("return window.commercialAutoClicked || false") and \
+                   not driver.execute_script("return window.zipCodeFilled || false"):
+                    try:
+                        print(f"[DEBUG] On Commercial Auto page, checking for zip code field...")
+                        print(f"[DEBUG] Current URL: {driver.current_url}")
+                        # Wait longer for form to load
+                        time.sleep(5)
+                        
+                        # Look for ALL input fields first to debug
+                        all_inputs = driver.find_elements(By.TAG_NAME, "input")
+                        print(f"[DEBUG] Total input fields on page: {len(all_inputs)}")
+                        
+                        # Look for garage/zip code field - try multiple selectors including case variations
+                        zip_elements = driver.find_elements(By.XPATH, 
+                            "//input[contains(translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'zip')] | " +
+                            "//input[contains(translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'zip')] | " +
+                            "//input[contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'zip')] | " +
+                            "//input[contains(translate(@name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'garage')] | " +
+                            "//input[contains(translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'garage')] | " +
+                            "//input[contains(translate(@placeholder, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'garage')] | " +
+                            "//input[@type='text' or @type='number'][position() > 1]"  # Get text/number inputs that aren't the first one
+                        )
+                        
+                        print(f"[DEBUG] Found {len(zip_elements)} potential zip code fields")
+                        
+                        # Debug: print info about visible inputs
+                        if len(zip_elements) == 0:
+                            print("[DEBUG] No zip fields found. Checking all visible inputs:")
+                            for idx, inp in enumerate(all_inputs[:10]):  # Check first 10 inputs
+                                if inp.is_displayed():
+                                    inp_type = inp.get_attribute('type') or 'text'
+                                    inp_name = inp.get_attribute('name') or ''
+                                    inp_id = inp.get_attribute('id') or ''
+                                    inp_placeholder = inp.get_attribute('placeholder') or ''
+                                    print(f"[DEBUG] Input {idx}: type={inp_type}, name={inp_name}, id={inp_id}, placeholder={inp_placeholder}")
+                        
+                        zip_filled = False
+                        for zip_elem in zip_elements:
+                            if zip_elem.is_displayed() and zip_elem.is_enabled():
+                                try:
+                                    elem_name = zip_elem.get_attribute('name') or ''
+                                    elem_id = zip_elem.get_attribute('id') or ''
+                                    elem_placeholder = zip_elem.get_attribute('placeholder') or ''
+                                    print(f"[DEBUG] Found zip field - name: '{elem_name}', id: '{elem_id}', placeholder: '{elem_placeholder}'")
+                                    
+                                    # Highlight the field
+                                    driver.execute_script("""
+                                        var elem = arguments[0];
+                                        elem.style.border = '3px solid blue';
+                                        elem.style.backgroundColor = 'rgba(0, 0, 255, 0.1)';
+                                    """, zip_elem)
+                                    
+                                    current_status = "Filling garage zip code..."
+                                    time.sleep(1)
+                                    
+                                    # Click and fill the zip code
+                                    driver.execute_script("""
+                                        var elem = arguments[0];
+                                        elem.scrollIntoView({block: 'center'});
+                                        elem.click();
+                                        elem.focus();
+                                        elem.value = '';
+                                        elem.value = '44256';
+                                        elem.dispatchEvent(new Event('input', { bubbles: true }));
+                                        elem.dispatchEvent(new Event('change', { bubbles: true }));
+                                        window.zipCodeFilled = true;
+                                        console.log('Zip code 44256 filled');
+                                    """, zip_elem)
+                                    
+                                    print("[DEBUG] Successfully filled zip code 44256")
+                                    zip_filled = True
+                                    time.sleep(1)
+                                    
+                                    # Now look for USDOT field to click
+                                    print("[DEBUG] Looking for USDOT field...")
+                                    usdot_elements = driver.find_elements(By.XPATH,
+                                        "//input[contains(@name, 'usdot') or contains(@id, 'usdot') or contains(@name, 'USDOT') or contains(@id, 'USDOT')] | " +
+                                        "//input[contains(@placeholder, 'USDOT') or contains(@aria-label, 'USDOT')] | " +
+                                        "//input[contains(@placeholder, 'DOT') or contains(@aria-label, 'DOT')] | " +
+                                        "//input[@type='text'][contains(preceding-sibling::label/text(), 'USDOT') or contains(following-sibling::label/text(), 'USDOT')]"
+                                    )
+                                    
+                                    print(f"[DEBUG] Found {len(usdot_elements)} potential USDOT fields")
+                                    
+                                    for usdot_elem in usdot_elements:
+                                        if usdot_elem.is_displayed() and usdot_elem.is_enabled():
+                                            try:
+                                                # Highlight and click USDOT field
+                                                driver.execute_script("""
+                                                    var elem = arguments[0];
+                                                    elem.style.border = '3px solid green';
+                                                    elem.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
+                                                    elem.scrollIntoView({block: 'center'});
+                                                    elem.click();
+                                                    elem.focus();
+                                                    console.log('USDOT field clicked');
+                                                """, usdot_elem)
+                                                
+                                                print("[DEBUG] Successfully clicked USDOT field")
+                                                current_status = "USDOT field selected - ready for input"
+                                                break
+                                            except Exception as usdot_error:
+                                                print(f"[DEBUG] Error clicking USDOT field: {usdot_error}")
+                                    
+                                    break  # Exit after successfully filling zip
+                                    
+                                except Exception as zip_error:
+                                    print(f"[DEBUG] Error filling zip code in this field: {zip_error}")
+                        
+                        if not zip_filled:
+                            print("[DEBUG] Could not find or fill zip code field")
+                            
+                    except Exception as e:
+                        print(f"[DEBUG] Error in zip code filling process: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
                 # Now continue with element detection for visual feedback
                 # This will show the red boxes around detected elements
                 
