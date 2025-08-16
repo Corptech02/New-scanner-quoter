@@ -1,0 +1,16 @@
+{
+    "current_version": "1.0.1",
+    "last_update": "2025-08-16",
+    "update_history": [
+        {
+            "version": "1.0.0",
+            "date": "2025-08-15",
+            "description": "Initial version from GitHub"
+        },
+        {
+            "version": "1.0.1",
+            "date": "2025-08-16",
+            "description": "Updated via Claude Voice interface"
+        }
+    ]
+}
