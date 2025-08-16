@@ -1,5 +1,5 @@
 {
-    "current_version": "1.0.1",
+    "current_version": "1.0.2",
     "last_update": "2025-08-16",
     "update_history": [
         {
@@ -9,6 +9,11 @@
         },
         {
             "version": "1.0.1",
+            "date": "2025-08-16",
+            "description": "Updated via Claude Voice interface"
+        },
+        {
+            "version": "1.0.2",
             "date": "2025-08-16",
             "description": "Updated via Claude Voice interface"
         }
