@@ -12,6 +12,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import TimeoutException
 import base64
 import io
 import time
@@ -1291,6 +1292,127 @@ def scan_geico_site():
                 if not has_username_field and not has_password_field:
                     # We're not on login page anymore, check if we need to click Commercial Auto/Trucking
                     try:
+                        # APPLY COMMERCIAL AUTO REFRESH PREVENTION FIX
+                        if not driver.execute_script("return window.commercialAutoFixApplied || false"):
+                            print("[DEBUG] Applying Commercial Auto refresh prevention fix...")
+                            driver.execute_script("""
+                            (function() {
+                                console.log('[COMMERCIAL AUTO FIX] Installing refresh prevention...');
+                                
+                                // Flag to track if fix is applied
+                                window.commercialAutoFixApplied = true;
+                                window.commercialAutoMode = false;
+                                
+                                // Store original navigation functions
+                                if (!window._navigationBackup) {
+                                    window._navigationBackup = {
+                                        pushState: history.pushState,
+                                        replaceState: history.replaceState,
+                                        assign: window.location.assign,
+                                        replace: window.location.replace,
+                                        reload: window.location.reload,
+                                        href: Object.getOwnPropertyDescriptor(window.location, 'href')
+                                    };
+                                }
+                                
+                                // Override navigation methods to prevent refresh during Commercial Auto mode
+                                history.pushState = function() {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Blocked pushState during Commercial Auto mode');
+                                        return;
+                                    }
+                                    return window._navigationBackup.pushState.apply(history, arguments);
+                                };
+                                
+                                history.replaceState = function() {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Blocked replaceState during Commercial Auto mode');
+                                        return;
+                                    }
+                                    return window._navigationBackup.replaceState.apply(history, arguments);
+                                };
+                                
+                                window.location.assign = function(url) {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Blocked location.assign to:', url);
+                                        return;
+                                    }
+                                    return window._navigationBackup.assign.call(window.location, url);
+                                };
+                                
+                                window.location.replace = function(url) {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Blocked location.replace to:', url);
+                                        return;
+                                    }
+                                    return window._navigationBackup.replace.call(window.location, url);
+                                };
+                                
+                                window.location.reload = function() {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Blocked location.reload');
+                                        return;
+                                    }
+                                    return window._navigationBackup.reload.call(window.location);
+                                };
+                                
+                                // Override location.href setter
+                                Object.defineProperty(window.location, 'href', {
+                                    get: function() {
+                                        return window._navigationBackup.href.get.call(window.location);
+                                    },
+                                    set: function(val) {
+                                        if (window.commercialAutoMode) {
+                                            console.log('[FIX] Blocked location.href change to:', val);
+                                            return;
+                                        }
+                                        window._navigationBackup.href.set.call(window.location, val);
+                                    }
+                                });
+                                
+                                // Intercept form submissions
+                                document.addEventListener('submit', function(e) {
+                                    if (window.commercialAutoMode) {
+                                        console.log('[FIX] Preventing form submission during Commercial Auto mode');
+                                        e.preventDefault();
+                                        return false;
+                                    }
+                                }, true);
+                                
+                                // Monitor all clicks for Commercial Auto
+                                document.addEventListener('click', function(e) {
+                                    var target = e.target;
+                                    var text = '';
+                                    
+                                    // Check element and parents for Commercial Auto text
+                                    var checkElement = target;
+                                    while (checkElement && checkElement !== document.body) {
+                                        text = (checkElement.textContent || checkElement.innerText || '');
+                                        
+                                        if (text.includes('Commercial Auto') || text.includes('Trucking')) {
+                                            console.log('[FIX] Detected Commercial Auto click, enabling protection mode');
+                                            
+                                            // Enable protection mode
+                                            window.commercialAutoMode = true;
+                                            window.commercialAutoClicked = true;
+                                            
+                                            // Disable protection after 3 seconds
+                                            setTimeout(function() {
+                                                window.commercialAutoMode = false;
+                                                console.log('[FIX] Commercial Auto protection mode disabled');
+                                            }, 3000);
+                                            
+                                            break;
+                                        }
+                                        checkElement = checkElement.parentElement;
+                                    }
+                                }, true);
+                                
+                                console.log('[COMMERCIAL AUTO FIX] Refresh prevention installed successfully');
+                            })();
+                            """)
+                            print("[DEBUG] Commercial Auto refresh prevention fix applied")
+                        
                         # Check if we've already clicked commercial auto (avoid repeated clicks)
                         if not driver.execute_script("return window.commercialAutoClicked || false"):
                             print(f"[DEBUG] Checking for Commercial Auto/Trucking tab on URL: {driver.current_url}")
@@ -1357,6 +1479,10 @@ def scan_geico_site():
                                 time.sleep(1)  # Brief pause to show highlight
                                 
                                 try:
+                                    # Store initial URL before clicking
+                                    initial_url = driver.current_url
+                                    print(f"[DEBUG] URL before click: {initial_url}")
+                                    
                                     # Try JavaScript click first for reliability
                                     driver.execute_script("""
                                         var elem = arguments[0];
@@ -1367,15 +1493,70 @@ def scan_geico_site():
                                     """, elem)
                                     print("[DEBUG] Successfully clicked Commercial Auto/Trucking tab via JavaScript")
                                     current_status = "Commercial Auto/Trucking clicked - loading..."
-                                    time.sleep(2)  # Wait for page to load
+                                    
+                                    # Wait for page to fully load and verify navigation
+                                    try:
+                                        # Wait for document ready state
+                                        WebDriverWait(driver, 10).until(
+                                            lambda d: d.execute_script("return document.readyState") == "complete"
+                                        )
+                                        
+                                        # Check if URL changed (indicating navigation)
+                                        time.sleep(1)  # Small delay to allow URL to update
+                                        new_url = driver.current_url
+                                        print(f"[DEBUG] URL after click: {new_url}")
+                                        
+                                        if new_url != initial_url:
+                                            print("[DEBUG] Navigation detected - waiting for new page to load")
+                                            # Wait for new page elements to appear
+                                            time.sleep(3)
+                                            
+                                            # Verify we're on commercial auto page
+                                            page_source = driver.page_source.lower()
+                                            if "commercial" in page_source or "trucking" in page_source:
+                                                print("[DEBUG] Successfully navigated to Commercial Auto page")
+                                                current_status = "On Commercial Auto/Trucking page"
+                                            else:
+                                                print("[DEBUG] Page loaded but may not be Commercial Auto page")
+                                        else:
+                                            print("[DEBUG] No URL change detected - checking for dynamic content")
+                                            # Page might load content dynamically without URL change
+                                            time.sleep(3)
+                                            
+                                    except TimeoutException:
+                                        print("[DEBUG] Timeout waiting for page load - continuing anyway")
+                                        time.sleep(2)
+                                        
                                 except Exception as js_error:
                                     print(f"[DEBUG] JavaScript click failed: {js_error}, trying Selenium click")
                                     try:
+                                        # Store initial URL before clicking
+                                        initial_url = driver.current_url
+                                        
                                         elem.click()
                                         driver.execute_script("window.commercialAutoClicked = true;")
                                         print("[DEBUG] Successfully clicked Commercial Auto/Trucking tab via Selenium")
                                         current_status = "Commercial Auto/Trucking clicked - loading..."
-                                        time.sleep(2)  # Wait for page to load
+                                        
+                                        # Same wait logic as above
+                                        try:
+                                            WebDriverWait(driver, 10).until(
+                                                lambda d: d.execute_script("return document.readyState") == "complete"
+                                            )
+                                            time.sleep(1)
+                                            new_url = driver.current_url
+                                            print(f"[DEBUG] URL after Selenium click: {new_url}")
+                                            
+                                            if new_url != initial_url:
+                                                print("[DEBUG] Navigation detected after Selenium click")
+                                                time.sleep(3)
+                                            else:
+                                                time.sleep(3)
+                                                
+                                        except TimeoutException:
+                                            print("[DEBUG] Timeout after Selenium click - continuing")
+                                            time.sleep(2)
+                                            
                                     except Exception as selenium_error:
                                         print(f"[DEBUG] Selenium click also failed: {selenium_error}")
                             
@@ -1447,22 +1628,259 @@ def scan_geico_site():
                                     current_status = "Filling garage zip code..."
                                     time.sleep(1)
                                     
-                                    # Click and fill the zip code
-                                    driver.execute_script("""
-                                        var elem = arguments[0];
-                                        elem.scrollIntoView({block: 'center'});
-                                        elem.click();
-                                        elem.focus();
-                                        elem.value = '';
-                                        elem.value = '44256';
-                                        elem.dispatchEvent(new Event('input', { bubbles: true }));
-                                        elem.dispatchEvent(new Event('change', { bubbles: true }));
-                                        window.zipCodeFilled = true;
-                                        console.log('Zip code 44256 filled');
-                                    """, zip_elem)
+                                    # Use Chrome DevTools Protocol for undetected ZIP entry
+                                    print("[DEBUG] Using Chrome DevTools Protocol (CDP) for undetected ZIP entry...")
                                     
-                                    print("[DEBUG] Successfully filled zip code 44256")
+                                    # First, hide webdriver detection
+                                    try:
+                                        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                                            'source': '''
+                                                Object.defineProperty(navigator, 'webdriver', {
+                                                    get: () => undefined
+                                                });
+                                            '''
+                                        })
+                                    except:
+                                        pass
+                                    
+                                    # Check if webdriver is being detected
+                                    bot_detected = driver.execute_script("return navigator.webdriver;")
+                                    if bot_detected:
+                                        print("[DEBUG] WARNING: Browser detecting automated control (navigator.webdriver = true)")
+                                    
+                                    try:
+                                        # Method 1: Try CDP input events (most undetectable)
+                                        print("[DEBUG] Method 1: Using Chrome DevTools Protocol...")
+                                        
+                                        # Get element position
+                                        element_info = driver.execute_script("""
+                                            var elem = arguments[0];
+                                            var rect = elem.getBoundingClientRect();
+                                            elem.scrollIntoView({block: 'center'});
+                                            return {
+                                                x: Math.round(rect.left + rect.width/2),
+                                                y: Math.round(rect.top + rect.height/2),
+                                                width: rect.width,
+                                                height: rect.height
+                                            };
+                                        """, zip_elem)
+                                        
+                                        # Click using CDP
+                                        driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                                            'type': 'mousePressed',
+                                            'x': element_info['x'],
+                                            'y': element_info['y'],
+                                            'button': 'left',
+                                            'clickCount': 1
+                                        })
+                                        
+                                        driver.execute_cdp_cmd('Input.dispatchMouseEvent', {
+                                            'type': 'mouseReleased',
+                                            'x': element_info['x'],
+                                            'y': element_info['y'],
+                                            'button': 'left',
+                                            'clickCount': 1
+                                        })
+                                        
+                                        time.sleep(0.3)
+                                        
+                                        # Clear field with Ctrl+A and Delete via CDP
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyDown',
+                                            'modifiers': 2,  # Ctrl
+                                            'key': 'a',
+                                            'code': 'KeyA',
+                                            'windowsVirtualKeyCode': 65
+                                        })
+                                        
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyUp',
+                                            'modifiers': 2,
+                                            'key': 'a',
+                                            'code': 'KeyA',
+                                            'windowsVirtualKeyCode': 65
+                                        })
+                                        
+                                        time.sleep(0.1)
+                                        
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyDown',
+                                            'key': 'Delete',
+                                            'code': 'Delete',
+                                            'windowsVirtualKeyCode': 46
+                                        })
+                                        
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyUp',
+                                            'key': 'Delete',
+                                            'code': 'Delete',
+                                            'windowsVirtualKeyCode': 46
+                                        })
+                                        
+                                        time.sleep(0.2)
+                                        
+                                        # Type each character via CDP
+                                        zip_code = '44256'
+                                        for i, char in enumerate(zip_code):
+                                            # Key down
+                                            driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                                'type': 'keyDown',
+                                                'key': char,
+                                                'code': f'Digit{char}',
+                                                'text': char,
+                                                'windowsVirtualKeyCode': 48 + int(char)
+                                            })
+                                            
+                                            # Character event
+                                            driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                                'type': 'char',
+                                                'text': char,
+                                                'key': char,
+                                                'windowsVirtualKeyCode': 48 + int(char)
+                                            })
+                                            
+                                            # Key up
+                                            driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                                'type': 'keyUp',
+                                                'key': char,
+                                                'code': f'Digit{char}',
+                                                'windowsVirtualKeyCode': 48 + int(char)
+                                            })
+                                            
+                                            # Natural typing delay
+                                            time.sleep(0.08 + (0.04 * (i % 2)))
+                                            print(f"[DEBUG] CDP typed: {char}")
+                                        
+                                        # Tab to trigger validation
+                                        time.sleep(0.3)
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyDown',
+                                            'key': 'Tab',
+                                            'code': 'Tab',
+                                            'windowsVirtualKeyCode': 9
+                                        })
+                                        
+                                        driver.execute_cdp_cmd('Input.dispatchKeyEvent', {
+                                            'type': 'keyUp',
+                                            'key': 'Tab',
+                                            'code': 'Tab',
+                                            'windowsVirtualKeyCode': 9
+                                        })
+                                        
+                                        print("[DEBUG] CDP method completed")
+                                        
+                                    except Exception as cdp_error:
+                                        print(f"[DEBUG] CDP method failed: {cdp_error}")
+                                        
+                                        # Fallback: Try execCommand
+                                        print("[DEBUG] Fallback: Using execCommand...")
+                                        success = driver.execute_script("""
+                                            var elem = arguments[0];
+                                            elem.focus();
+                                            elem.select();
+                                            document.execCommand('delete');
+                                            
+                                            var success = true;
+                                            '44256'.split('').forEach(function(char) {
+                                                if (!document.execCommand('insertText', false, char)) {
+                                                    success = false;
+                                                }
+                                            });
+                                            
+                                            elem.blur();
+                                            return success;
+                                        """, zip_elem)
+                                        
+                                        if not success:
+                                            # Final fallback: ActionChains
+                                            print("[DEBUG] Final fallback: ActionChains...")
+                                            actions = ActionChains(driver)
+                                            actions.move_to_element(zip_elem).click().perform()
+                                            time.sleep(0.2)
+                                            actions.key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).perform()
+                                            actions.send_keys(Keys.DELETE).perform()
+                                            time.sleep(0.1)
+                                            for char in '44256':
+                                                actions.send_keys(char).perform()
+                                                time.sleep(0.1)
+                                            actions.send_keys(Keys.TAB).perform()
+                                        
+                                        # Wait for validation
+                                        time.sleep(1.5)
+                                        
+                                        # Method 3: If still no state, try clicking elsewhere to trigger validation
+                                        state_check = driver.execute_script("""
+                                            var states = document.querySelectorAll('select[name*="state"], input[name*="state"], #state');
+                                            for (var i = 0; i < states.length; i++) {
+                                                if (states[i].value && states[i].value !== '') {
+                                                    return states[i].value;
+                                                }
+                                            }
+                                            return null;
+                                        """)
+                                        
+                                        if not state_check:
+                                            print("[DEBUG] State not populated yet, trying to trigger validation...")
+                                            
+                                            # Click on body to ensure field loses focus
+                                            driver.execute_script("document.body.click();")
+                                            time.sleep(0.5)
+                                            
+                                            # Try clicking next visible input field
+                                            driver.execute_script("""
+                                                var inputs = document.querySelectorAll('input:not([type="hidden"]), select');
+                                                var zipField = arguments[0];
+                                                var foundZip = false;
+                                                
+                                                for (var i = 0; i < inputs.length; i++) {
+                                                    if (inputs[i] === zipField) {
+                                                        foundZip = true;
+                                                    } else if (foundZip && inputs[i].offsetParent !== null) {
+                                                        inputs[i].click();
+                                                        inputs[i].focus();
+                                                        break;
+                                                    }
+                                                }
+                                            """, zip_elem)
+                                            
+                                            time.sleep(1)
+                                            
+                                            # Final state check
+                                            state_check = driver.execute_script("""
+                                                var states = document.querySelectorAll('select[name*="state"], input[name*="state"], #state');
+                                                for (var i = 0; i < states.length; i++) {
+                                                    if (states[i].value && states[i].value !== '') {
+                                                        return states[i].value;
+                                                    }
+                                                }
+                                                return null;
+                                            """)
+                                        
+                                        if state_check:
+                                            print(f"[DEBUG] SUCCESS! State populated: {state_check}")
+                                            driver.execute_script("arguments[0].style.backgroundColor = 'lightgreen';", zip_elem)
+                                        else:
+                                            print("[DEBUG] WARNING: State still not populated")
+                                            print("[DEBUG] ZIP code is in field but validation may not have triggered")
+                                            
+                                            # Log any validation messages
+                                            validation_msg = driver.execute_script("""
+                                                var elem = arguments[0];
+                                                return {
+                                                    validity: elem.validity,
+                                                    validationMessage: elem.validationMessage,
+                                                    value: elem.value
+                                                };
+                                            """, zip_elem)
+                                            print(f"[DEBUG] Field state: {validation_msg}")
+                                            
+                                    except Exception as e:
+                                        print(f"[DEBUG] Error during ZIP entry: {e}")
+                                        import traceback
+                                        traceback.print_exc()
+                                    
                                     zip_filled = True
+                                    # Wait for validation to complete
                                     time.sleep(1)
                                     
                                     # Now look for USDOT field to click
